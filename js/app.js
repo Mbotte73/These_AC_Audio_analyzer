@@ -112,7 +112,7 @@ function obtenirPsd(v) {
   const { freqs, psd, df } = calculerPsd(resultatsBase[v].pression, wavData.fs, fftParams);
   const psdCorrige = new Float64Array(psd.length);
   for (let k = 0; k < psd.length; k++) psdCorrige[k] = psd[k] * Math.pow(10, -correctionMicroDb(freqs[k])/10);
-  const bandesA = tiersOctave(freqs, psdCorrige, df, "A");
+  const bandesA = tiersOctave(freqs, psdCorrige, df, "A", resultatsBase[v].pref);
   return mettreEnCache(cachePsd, cle, { freqs, psdBrut: psd, psdCorrige, df, bandesA });
 }
 

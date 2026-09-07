@@ -241,7 +241,8 @@ function lpeak(signalC, pref) {
   return niveauDb(m, pref);
 }
 
-function tiersOctave(freqs, psd, df, ponderation) {
+function tiersOctave(freqs, psd, df, ponderation, pref) {
+  if (pref === undefined) pref = PREF;
   const niveaux = [];
   for (const fc of FREQ_TIERS_OCTAVE) {
     const fBas = fc/Math.pow(2,1/6), fHaut = fc*Math.pow(2,1/6);
@@ -253,7 +254,7 @@ function tiersOctave(freqs, psd, df, ponderation) {
         puissance += p*df;
       }
     }
-    niveaux.push(niveauDb(Math.sqrt(Math.max(puissance,0)), PREF));
+    niveaux.push(niveauDb(Math.sqrt(Math.max(puissance,0)), pref));
   }
   return niveaux;
 }
