@@ -1,0 +1,12 @@
+{
+  "name": "these-ac-audio-analyzer-tests",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Harnais de tests (Playwright) pour l'outil d'analyse acoustique. L'outil lui-meme (index.html) reste utilisable sans installation ; ces tests, eux, necessitent Node.js.",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.47.0"
+  }
+}
