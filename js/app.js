@@ -23,34 +23,69 @@ let voieCourbeCapteur = null;
 
 function baseNomFichier() { return wavData.nomFichier.replace(/\.wav$/i, ""); }
 
+/* baseName sans extension, pour comparer les noms de fichiers WAV et TXT */
+function baseNomSansExt(nom) { return nom.replace(/\.[^.]+$/, ""); }
+
 /* ---------------------------------------------------------- depot fichiers */
-function configurerZoneDepot(dropId, inputId, nomId, onFichier) {
-  const drop = document.getElementById(dropId), input = document.getElementById(inputId), nom = document.getElementById(nomId);
+function afficherAvertissementDepot(texte) {
+  const div = document.getElementById("avertDepot");
+  if (!texte) { div.style.display = "none"; div.textContent = ""; return; }
+  div.style.display = ""; div.textContent = texte;
+}
+
+async function traiterFichiers(liste) {
+  const fichiers = Array.from(liste);
+  const fichierWav = fichiers.find(f => /\.wav$/i.test(f.name));
+  const fichierTxt = fichiers.find(f => /\.txt$/i.test(f.name));
+  const inconnus = fichiers.filter(f => f !== fichierWav && f !== fichierTxt);
+
+  let avertissement = "";
+  if (inconnus.length) {
+    avertissement = `Fichier(s) ignoré(s), extension non reconnue : ${inconnus.map(f=>f.name).join(", ")}.`;
+  }
+
+  if (fichierWav) {
+    const buf = await fichierWav.arrayBuffer();
+    try {
+      wavData = lireWav(buf);
+      wavData.nomFichier = fichierWav.name;
+      document.getElementById("btnAnalyser").disabled = false;
+      document.getElementById("nomWav").textContent = "Audio : " + fichierWav.name;
+    } catch(err) {
+      alert("Erreur de lecture du fichier WAV : " + err.message);
+      wavData = null;
+      document.getElementById("btnAnalyser").disabled = true;
+      document.getElementById("nomWav").textContent = "";
+    }
+  }
+
+  if (fichierTxt) {
+    txtTexte = await fichierTxt.text();
+    document.getElementById("nomTxt").textContent = "Métadonnées : " + fichierTxt.name;
+  }
+
+  if (fichierWav && fichierTxt && baseNomSansExt(fichierWav.name) !== baseNomSansExt(fichierTxt.name)) {
+    avertissement = (avertissement ? avertissement + " " : "") +
+      `Attention : les noms de fichiers ne correspondent pas (${fichierWav.name} / ${fichierTxt.name}). Le WAV est chargé quand même.`;
+  }
+  afficherAvertissementDepot(avertissement);
+}
+
+function configurerZoneDepot() {
+  const drop = document.getElementById("dropFichiers"), input = document.getElementById("inputFichiers");
   drop.addEventListener("click", ()=>input.click());
   drop.addEventListener("dragover", e=>{ e.preventDefault(); drop.classList.add("over"); });
   drop.addEventListener("dragleave", ()=>drop.classList.remove("over"));
   drop.addEventListener("drop", e=>{
     e.preventDefault(); drop.classList.remove("over");
-    if (e.dataTransfer.files.length) { input.files = e.dataTransfer.files; onFichier(e.dataTransfer.files[0]); nom.textContent = e.dataTransfer.files[0].name; }
+    if (e.dataTransfer.files.length) traiterFichiers(e.dataTransfer.files);
   });
-  input.addEventListener("change", ()=>{ if (input.files.length) { onFichier(input.files[0]); nom.textContent = input.files[0].name; } });
+  input.addEventListener("change", ()=>{
+    if (input.files.length) traiterFichiers(input.files);
+    input.value = "";
+  });
 }
-
-configurerZoneDepot("dropWav","inputWav","nomWav", async (fichier)=>{
-  const buf = await fichier.arrayBuffer();
-  try {
-    wavData = lireWav(buf);
-    wavData.nomFichier = fichier.name;
-    document.getElementById("btnAnalyser").disabled = false;
-  } catch(err) {
-    alert("Erreur de lecture du fichier WAV : " + err.message);
-    wavData = null;
-  }
-});
-
-configurerZoneDepot("dropTxt","inputTxt","nomTxt", async (fichier)=>{
-  txtTexte = await fichier.text();
-});
+configurerZoneDepot();
 
 document.getElementById("btnAnalyser").addEventListener("click", ()=>{
   if (!wavData) return;

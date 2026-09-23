@@ -20,8 +20,7 @@ async function chargerMesure(page, { canaux, fs, splParVoie }) {
   fsNode.writeFileSync(txtPath, construireCalibrationTxt(splParVoie));
 
   await page.goto("/index.html");
-  await page.locator("#inputWav").setInputFiles(wavPath);
-  await page.locator("#inputTxt").setInputFiles(txtPath);
+  await page.locator("#inputFichiers").setInputFiles([wavPath, txtPath]);
   await expect(page.locator("#btnAnalyser")).toBeEnabled();
   await page.locator("#btnAnalyser").click();
   await page.locator("#tabsNav button").first().waitFor();

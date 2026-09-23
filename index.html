@@ -16,24 +16,19 @@
 <main>
 
   <div class="panel no-print">
-    <h2>1. Fichier audio (.WAV)</h2>
-    <div class="drop" id="dropWav">
-      <div>Déposez le fichier ici, ou <strong>cliquez pour le choisir</strong></div>
-      <input type="file" id="inputWav" accept=".wav">
-      <div class="filename" id="nomWav"></div>
-    </div>
-  </div>
-
-  <div class="panel no-print">
-    <h2>2. Fichier de métadonnées (.TXT, facultatif)</h2>
+    <h2>1. Fichiers de mesure (.WAV et .TXT)</h2>
     <p style="color:var(--ink-soft); font-size:.9rem; margin-top:-.4rem;">
-      S'il est fourni et que l'étalonnage y est renseigné, les niveaux s'affichent en dB SPL absolu. Sinon, l'analyse continue en dBFS relatif.
+      Déposez le fichier audio (.WAV) et, si vous l'avez, le fichier de métadonnées (.TXT) — ensemble ou l'un après l'autre.
+      S'il est fourni et que l'étalonnage y est renseigné, les niveaux s'affichent en dB SPL absolu, sinon l'analyse continue en dBFS relatif.
+      Astuce : dans la boîte de dialogue, les deux fichiers peuvent être sélectionnés ensemble (Ctrl+clic) pour aller plus vite.
     </p>
-    <div class="drop" id="dropTxt">
-      <div>Déposez le fichier ici, ou <strong>cliquez pour le choisir</strong></div>
-      <input type="file" id="inputTxt" accept=".txt">
+    <div class="drop" id="dropFichiers">
+      <div>Déposez le ou les fichiers ici, ou <strong>cliquez pour les choisir</strong></div>
+      <input type="file" id="inputFichiers" multiple accept=".wav,.txt">
+      <div class="filename" id="nomWav"></div>
       <div class="filename" id="nomTxt"></div>
     </div>
+    <div class="avertissement" id="avertDepot" style="display:none; margin-top:1rem;"></div>
   </div>
 
   <div class="panel no-print" style="text-align:center;">
