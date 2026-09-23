@@ -24,6 +24,18 @@ const B_C = [2.1700856195e-01, 1.7647146405e-17, -4.3401712390e-01, -1.764714640
 const A_C = [1.0000000000e+00, -2.1346749637e+00, 1.2793335332e+00, -1.4955984609e-01, 4.9087001746e-03];
 const PREF = 20e-6;
 
+/* Passe-haut Butterworth ordre 2, frequence de coupure 20 Hz, precalcule
+   pour 44100 Hz (memes methode et validation que B_A/A_C ci-dessus :
+   transformee bilineaire, formules RBJ audio-eq-cookbook, Q = 1/sqrt(2)
+   pour Butterworth ; verifie : -3.01 dB a 20 Hz, -12.30 dB a 10 Hz, 0 dB
+   a 1000 Hz). Applique au signal de pression brut, avant les ponderations
+   A/C et avant l'OASPL non pondere, pour tous les niveaux integres
+   (OASPL, LAeq, LCeq, LCpeak, LAFmax) uniquement : le spectre en bande
+   fine, les tiers d'octave et le spectrogramme restent sur le signal non
+   filtre. */
+const B_HP20 = [9.9798711568e-01, -1.9959742314e+00, 9.9798711568e-01];
+const A_HP20 = [1.0000000000e+00, -1.9959701796e+00, 9.9597828306e-01];
+
 const FREQ_TIERS_OCTAVE = [20,25,31.5,40,50,63,80,100,125,160,200,250,315,400,500,630,800,1000,1250,1600,2000,2500,3150,4000,5000,6300,8000,10000,12500,16000,20000];
 
 /* Tailles de fenetre proposees a l'utilisateur pour l'analyse FFT (spectre,

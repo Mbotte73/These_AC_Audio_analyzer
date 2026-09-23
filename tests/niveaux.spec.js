@@ -103,3 +103,34 @@ test("bruit blanc calibré : OASPL correct à 0,2 dB près", async ({ page }) =>
   const oaspl = parseFloat(cellules[1]);
   expect(Math.abs(oaspl - ATTENDU)).toBeLessThan(0.2);
 });
+
+test("filtre passe-haut 20 Hz : ton 10 Hz nettement plus atténué qu'un ton 1 kHz au même niveau numérique (point 3)", async ({ page }) => {
+  const SPL_CONST = 100, NIVEAU_DBFS = -20;
+
+  const { fs: fs10, canaux: canaux10 } = genererTonPur({ freqHz: 10, niveauDbfsRms: NIVEAU_DBFS, dureeS: 5, nCh: 4 });
+  await chargerMesure(page, { canaux: canaux10, fs: fs10, splParVoie: [SPL_CONST, SPL_CONST, SPL_CONST, SPL_CONST] });
+  const cellules10 = await page.locator("#zoneResultats table tbody tr").first().locator("td").allTextContents();
+  const oaspl10 = parseFloat(cellules10[1]);
+
+  const { fs: fs1k, canaux: canaux1k } = genererTonPur({ freqHz: 1000, niveauDbfsRms: NIVEAU_DBFS, dureeS: 5, nCh: 4 });
+  await chargerMesure(page, { canaux: canaux1k, fs: fs1k, splParVoie: [SPL_CONST, SPL_CONST, SPL_CONST, SPL_CONST] });
+  const cellules1k = await page.locator("#zoneResultats table tbody tr").first().locator("td").allTextContents();
+  const oaspl1k = parseFloat(cellules1k[1]);
+
+  // Butterworth ordre 2, coupure 20 Hz : attenuation theorique -12,30 dB a
+  // 10 Hz (une octave sous la coupure), quasi nulle a 1 kHz.
+  expect(oaspl1k - oaspl10).toBeGreaterThan(12);
+});
+
+test("filtre passe-haut 20 Hz : ton 1 kHz non dégradé, moins de 0,2 dB d'écart avec le calcul sans filtre (point 3)", async ({ page }) => {
+  const SPL_CONST = 100, NIVEAU_DBFS = -20;
+  const { fs, canaux } = genererTonPur({ freqHz: 1000, niveauDbfsRms: NIVEAU_DBFS, dureeS: 3, nCh: 4 });
+  await chargerMesure(page, { canaux, fs, splParVoie: [SPL_CONST, SPL_CONST, SPL_CONST, SPL_CONST] });
+
+  const ecart = await page.evaluate(() => {
+    const r = resultatsBase[0];
+    const sansFiltre = leq(r.pression, r.pref); // r.pression : signal calibre, non filtre
+    return Math.abs(r.leqZ - sansFiltre);
+  });
+  expect(ecart).toBeLessThan(0.2);
+});

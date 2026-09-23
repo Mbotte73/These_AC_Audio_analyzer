@@ -104,12 +104,17 @@ function demarrerAnalyse() {
     const gain = calibre ? PREF*Math.pow(10, spl/20) : 1.0;
     const pression = wavData.canaux[v].map(x=>x*gain);
 
-    const sigA = lfilter(B_A, A_A, pression);
-    const sigC = lfilter(B_C, A_C, pression);
+    // Passe-haut 20 Hz applique en commun a tous les niveaux integres
+    // (OASPL, LAeq, LCeq, LCpeak, LAFmax), avant les ponderations A/C.
+    // Le spectre en bande fine, les tiers d'octave et le spectrogramme
+    // restent calcules sur `pression` (non filtree), stockee ci-dessous.
+    const pressionHp = lfilter(B_HP20, A_HP20, pression);
+    const sigA = lfilter(B_A, A_A, pressionHp);
+    const sigC = lfilter(B_C, A_C, pressionHp);
 
     resultatsBase.push({
       voie: v, calibre, pref, pression,
-      leqA: leq(sigA, pref), leqC: leq(sigC, pref), leqZ: leq(pression, pref),
+      leqA: leq(sigA, pref), leqC: leq(sigC, pref), leqZ: leq(pressionHp, pref),
       lafmax: lmaxFast(sigA, wavData.fs, pref), lcpeak: lpeak(sigC, pref),
       temporel: niveauTemporel(sigA, wavData.fs, pref, 1.0),
     });
@@ -415,6 +420,11 @@ function construirePanelSynthese() {
        <dt>LCpeak</dt><dd>niveau de crête en dB(C), pour un événement bref et fort.</dd>
        <dt>LAFmax</dt><dd>niveau maximal en dB(A), intégration rapide (125 ms).</dd>
      </dl>
+     <p class="note" style="font-size:.82rem; color:var(--ink-soft); margin:.4rem 0 0;">
+       Ces cinq niveaux globaux sont calculés après un filtre passe-haut à 20 Hz (Butterworth ordre 2) : le contenu
+       en dessous de 20 Hz n'y contribue plus. Le spectre en bande fine et les tiers d'octave, dans chaque onglet
+       Voie, restent inchangés et affichent tout le contenu disponible, y compris en dessous de 20 Hz.
+     </p>
      <button class="secondaire no-print" id="btnCsv">Télécharger le tableau (CSV)</button>
      <button class="secondaire no-print" id="btnPdf" style="margin-left:.6rem;">Imprimer / enregistrer en PDF</button>`;
 
