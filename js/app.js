@@ -215,6 +215,25 @@ function activerOnglet(id) {
 
 function rafraichirOngletActif() { activerOnglet(ongletActif); }
 
+/* -------------------------------------------------------------- impression */
+// L'impression par onglets ne montre par defaut que l'onglet actuellement
+// affiche. On rend ici le contenu des 4 voies, de la comparaison et de
+// l'onglet capteur d'un coup (meme un onglet jamais visite), pendant que la
+// classe "impression" force temporairement leur affichage a l'ecran pour
+// que les canvas obtiennent une largeur/hauteur correcte ; le tout est
+// synchrone (aucun requestAnimationFrame), donc rien n'est visible a
+// l'ecran entre l'ajout et le retrait de la classe.
+function preparerVueImpression() {
+  if (!wavData) return;
+  document.body.classList.add("impression");
+  for (let v = 0; v < wavData.nCh; v++) rendreOngletVoie(v, document.getElementById(`contenu-voie${v}`));
+  rendreOngletComparaison(document.getElementById("contenu-comparaison"));
+  rendreOngletCapteur(document.getElementById("contenu-capteur"));
+  viderDessinsEnAttente();
+  document.body.classList.remove("impression");
+}
+window.addEventListener("beforeprint", preparerVueImpression);
+
 /* ----------------------------------------------------------- controles FFT */
 function creerControlesFft(maxLen) {
   const div = document.createElement("div");
@@ -258,10 +277,18 @@ function creerControlesFft(maxLen) {
 }
 
 /* ---------------------------------------------------------------- onglet voie */
+function creerTitreImpression(texte) {
+  const h = document.createElement("h2");
+  h.className = "titre-impression";
+  h.textContent = texte;
+  return h;
+}
+
 function rendreOngletVoie(v, conteneur) {
   const r = resultatsBase[v];
   const unite = uniteCourante();
   conteneur.innerHTML = "";
+  conteneur.appendChild(creerTitreImpression(`${nomVoie(v)} — ${r.calibre ? "étalonnée, dB SPL" : "non étalonnée, dBFS"}`));
   conteneur.appendChild(creerControlesFft(r.pression.length));
 
   const cartes = document.createElement("div");
@@ -295,6 +322,25 @@ function rendreOngletVoie(v, conteneur) {
   }, () => `${baseNomFichier()}_voie${v+1}_spectrogramme.png`, "spectrogramme"));
 }
 
+// Dessin des canvas differe au frame suivant (il doit deja etre dans le DOM,
+// visible, pour avoir une largeur/hauteur). File d'attente partagee plutot
+// qu'un requestAnimationFrame par bloc, pour pouvoir aussi la vider de
+// facon synchrone (vue d'impression, cf. preparerVueImpression ci-dessous).
+let dessinsEnAttente = [];
+let vidageDejaPlanifie = false;
+
+function planifierVidage() {
+  if (vidageDejaPlanifie) return;
+  vidageDejaPlanifie = true;
+  requestAnimationFrame(() => { vidageDejaPlanifie = false; viderDessinsEnAttente(); });
+}
+
+function viderDessinsEnAttente() {
+  const file = dessinsEnAttente;
+  dessinsEnAttente = [];
+  for (const { canvas, dessiner } of file) dessiner(canvas);
+}
+
 function creerBlocGraphique(idBase, titre, dessiner, nomFichierFn, classeSupp) {
   const wrap = document.createElement("div");
   wrap.className = "chart-wrap";
@@ -303,14 +349,15 @@ function creerBlocGraphique(idBase, titre, dessiner, nomFichierFn, classeSupp) {
   canvas.id = `c-${idBase}`;
   wrap.appendChild(canvas);
   wrap.appendChild(boutonExportCanvas(canvas, nomFichierFn));
-  // dessin differe : le canvas doit deja etre dans le DOM (visible) pour avoir une largeur/hauteur
-  requestAnimationFrame(()=>dessiner(canvas));
+  dessinsEnAttente.push({ canvas, dessiner });
+  planifierVidage();
   return wrap;
 }
 
 /* ---------------------------------------------------------- onglet comparaison */
 function rendreOngletComparaison(conteneur) {
   conteneur.innerHTML = "";
+  conteneur.appendChild(creerTitreImpression("Comparaison"));
   conteneur.appendChild(creerControlesFft(resultatsBase[0].pression.length));
 
   const cases = document.createElement("div");
@@ -348,6 +395,7 @@ function rendreOngletComparaison(conteneur) {
 function rendreOngletCapteur(conteneur) {
   if (voieCourbeCapteur === null) voieCourbeCapteur = dernierVoieActive;
   conteneur.innerHTML = "";
+  conteneur.appendChild(creerTitreImpression("Paramètres du capteur"));
 
   const panelCal = document.createElement("div");
   let lignes = "";
@@ -430,7 +478,7 @@ function construirePanelSynthese() {
 
   requestAnimationFrame(()=>{
     document.getElementById("btnCsv").addEventListener("click", ()=>telechargerCsv());
-    document.getElementById("btnPdf").addEventListener("click", ()=>window.print());
+    document.getElementById("btnPdf").addEventListener("click", ()=>{ preparerVueImpression(); window.print(); });
   });
   return panel;
 }

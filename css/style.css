@@ -70,6 +70,12 @@ canvas.chart.spectrogramme{ height:380px; }
 .tabs button:hover:not(.actif){ background:var(--brand-soft); color:var(--ink); }
 .onglet-contenu{ display:none; }
 .onglet-contenu.actif{ display:block; }
+/* Rendu de tous les onglets pendant preparerVueImpression() (app.js) : les
+   canvas ont besoin d'etre visibles, donc mesurables, pour se dessiner
+   correctement avant l'impression. Etat purement transitoire (ajoute puis
+   retire de facon synchrone), jamais visible a l'ecran en usage normal. */
+.impression .onglet-contenu{ display:block; }
+.titre-impression{ display:none; }
 
 /* ------------------------------------------------------------- controles FFT */
 .fft-controles{
@@ -104,5 +110,8 @@ footer{ text-align:center; color:var(--ink-soft); font-size:.82rem; padding:1rem
   body{ background:#fff; }
   .panel{ border:none; padding:0; }
   canvas.chart{ border:none; }
-  .onglet-contenu{ display:block !important; }
+  .onglet-contenu{ display:block !important; break-before:page; }
+  .onglet-contenu:first-child{ break-before:auto; }
+  .titre-impression{ display:block; color:var(--brand); font-size:1.15rem; margin:0 0 .8rem; }
+  .chart-wrap{ break-inside:avoid; }
 }
