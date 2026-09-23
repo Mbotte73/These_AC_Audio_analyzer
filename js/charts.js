@@ -242,21 +242,30 @@ function tracerBarres(canvas, labels, values, opts) {
 }
 
 /* ============================================================ spectrogramme */
-function couleurDb(v, vmin, vmax) {
+const COULEUR_DB_STOPS = [
+  [0.00, 15, 20, 60],
+  [0.25, 20, 90, 150],
+  [0.50, 40, 170, 120],
+  [0.75, 235, 200, 40],
+  [1.00, 210, 40, 30],
+];
+
+// Degrade multi-points bleu fonce -> cyan -> vert -> jaune -> rouge, en
+// composantes [r,g,b] (pas de chaine/regex ici : cette fonction est appelee
+// jusqu'a plusieurs millions de fois pour un spectrogramme long, cf.
+// tracerSpectrogramme). couleurDb() ci-dessous fournit la forme chaine,
+// utilisee seulement pour la barre de couleur (peu d'appels).
+function couleurDbRGB(v, vmin, vmax) {
   let t = (v - vmin) / (vmax - vmin || 1);
   t = Math.min(Math.max(t, 0), 1);
-  // degrade multi-points bleu fonce -> cyan -> vert -> jaune -> rouge
-  const stops = [
-    [0.00, 15, 20, 60],
-    [0.25, 20, 90, 150],
-    [0.50, 40, 170, 120],
-    [0.75, 235, 200, 40],
-    [1.00, 210, 40, 30],
-  ];
-  let i = 0; while (i < stops.length-2 && t > stops[i+1][0]) i++;
-  const [t0,r0,g0,b0] = stops[i], [t1,r1,g1,b1] = stops[i+1];
+  let i = 0; while (i < COULEUR_DB_STOPS.length-2 && t > COULEUR_DB_STOPS[i+1][0]) i++;
+  const [t0,r0,g0,b0] = COULEUR_DB_STOPS[i], [t1,r1,g1,b1] = COULEUR_DB_STOPS[i+1];
   const f = (t - t0) / (t1 - t0 || 1);
-  const r = Math.round(r0 + f*(r1-r0)), g = Math.round(g0 + f*(g1-g0)), b = Math.round(b0 + f*(b1-b0));
+  return [Math.round(r0 + f*(r1-r0)), Math.round(g0 + f*(g1-g0)), Math.round(b0 + f*(b1-b0))];
+}
+
+function couleurDb(v, vmin, vmax) {
+  const [r,g,b] = couleurDbRGB(v, vmin, vmax);
   return `rgb(${r},${g},${b})`;
 }
 
@@ -278,13 +287,23 @@ function tracerSpectrogramme(canvas, freqs, temps, trames, opts) {
   let nBinsAff = nBins; while (nBinsAff>1 && freqs[nBinsAff-1] > fMax) nBinsAff--;
 
   const pref2 = PREF*PREF;
+  // Correction (reponse du capteur) precalculee UNE FOIS par raie de
+  // frequence, plutot qu'a chaque (trame, raie) : la correction ne depend
+  // que de la frequence, pas du temps, et ce tableau evite jusqu'a
+  // plusieurs dizaines de millions d'appels a correctionMicroDb() sur un
+  // spectrogramme long.
+  let corrLin = null;
+  if (opts.correctionDb) {
+    corrLin = new Float64Array(nBinsAff);
+    for (let k=0;k<nBinsAff;k++) corrLin[k] = Math.pow(10, -opts.correctionDb(freqs[k])/10);
+  }
   const dbMat = new Float64Array(nFrames*nBinsAff);
   let vmin = Infinity, vmax = -Infinity;
   for (let i=0;i<nFrames;i++){
     const trame = trames[i];
     for (let k=0;k<nBinsAff;k++){
       let p = trame[k];
-      if (opts.correctionDb) p *= Math.pow(10, -opts.correctionDb(freqs[k])/10);
+      if (corrLin) p *= corrLin[k];
       const db = 10*Math.log10(Math.max(p,1e-24)/pref2);
       dbMat[i*nBinsAff+k] = db;
       if (isFinite(db)) { if (db<vmin) vmin=db; if (db>vmax) vmax=db; }
@@ -312,8 +331,7 @@ function tracerSpectrogramme(canvas, freqs, temps, trames, opts) {
       const kDebut = ligne*groupe, kFin = Math.min(kDebut+groupe, nBinsAff);
       let db = -Infinity;
       for (let k=kDebut;k<kFin;k++) { const v = dbMat[i*nBinsAff+k]; if (v>db) db = v; }
-      const col = couleurDb(db, vmin, vmax);
-      const [r,g,b] = col.match(/\d+/g).map(Number);
+      const [r,g,b] = couleurDbRGB(db, vmin, vmax);
       const row = nLignes-1-ligne; // frequence croissante vers le haut
       const idx = (row*nFrames + i)*4;
       img.data[idx]=r; img.data[idx+1]=g; img.data[idx+2]=b; img.data[idx+3]=255;

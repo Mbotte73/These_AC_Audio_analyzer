@@ -87,17 +87,31 @@ function configurerZoneDepot() {
 }
 configurerZoneDepot();
 
-document.getElementById("btnAnalyser").addEventListener("click", ()=>{
+document.getElementById("btnAnalyser").addEventListener("click", async ()=>{
   if (!wavData) return;
   calibration = lireCalibration(txtTexte);
-  demarrerAnalyse();
+  const bouton = document.getElementById("btnAnalyser");
+  bouton.disabled = true;
+  await demarrerAnalyse();
+  bouton.disabled = false;
 });
 
+function attendreProchaineImage() { return new Promise(r => requestAnimationFrame(r)); }
+
 /* ==================================================================== analyse */
-function demarrerAnalyse() {
+// Fonction asynchrone, avec un point d'attente entre chaque voie (via
+// requestAnimationFrame) : sur un fichier de plusieurs minutes, le filtrage
+// a lui seul prend plusieurs secondes par voie, et ce decoupage laisse le
+// navigateur peindre l'etat "Analyse en cours" entre deux voies plutot que
+// de geler l'onglet pendant toute la duree du traitement.
+async function demarrerAnalyse() {
+  const statut = document.getElementById("statutAnalyse");
   cachePsd.clear(); cacheStft.clear();
   resultatsBase = [];
   for (let v = 0; v < wavData.nCh; v++) {
+    statut.textContent = `Analyse en cours… voie ${v+1}/${wavData.nCh}`;
+    await attendreProchaineImage();
+
     const spl = calibration[v];
     const calibre = spl !== null && spl !== undefined;
     const pref = calibre ? PREF : 1.0;
@@ -120,12 +134,20 @@ function demarrerAnalyse() {
     });
   }
 
+  // La construction de l'onglet initial (spectre + spectrogramme de la
+  // voie 1) reste un bloc synchrone couteux sur un fichier long : on laisse
+  // le message d'etat visible le temps qu'il s'affiche, plutot que de
+  // l'effacer juste avant que l'interface ne gele quelques secondes.
+  statut.textContent = "Préparation de l'affichage…";
+  await attendreProchaineImage();
+
   fftParams = parametresFftParDefaut(wavData.fs, resultatsBase[0].pression.length);
   voieCourbeCapteur = null;
   ongletActif = "voie0"; dernierVoieActive = 0;
   comparaisonSelection = resultatsBase.map(()=>true);
 
   construireInterface();
+  statut.textContent = "";
 }
 
 function uniteCourante() {
@@ -320,6 +342,13 @@ function rendreOngletVoie(v, conteneur) {
     tracerSpectrogramme(canvas, Array.from(stft.freqs), stft.temps, stft.trames,
       { titre: "Spectrogramme (corrigé de la réponse du capteur)", correctionDb: correctionMicroDb, fMax: wavData.fs/2 });
   }, () => `${baseNomFichier()}_voie${v+1}_spectrogramme.png`, "spectrogramme"));
+
+  if (stft.tramesGroupees) {
+    const note = document.createElement("p");
+    note.className = "note";
+    note.textContent = `Fichier long : ${stft.tramesGroupees} trames FFT moyennées par colonne affichée sur le spectrogramme ci-dessus (résolution temporelle réduite à l'affichage seulement). Les niveaux globaux et le spectre en bande fine restent calculés sur la totalité du fichier.`;
+    conteneur.appendChild(note);
+  }
 }
 
 // Dessin des canvas differe au frame suivant (il doit deja etre dans le DOM,

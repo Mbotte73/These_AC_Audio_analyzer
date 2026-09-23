@@ -84,7 +84,8 @@ canvas.chart.spectrogramme{ height:380px; }
 }
 .fft-controles label{ display:flex; flex-direction:column; gap:.3rem; font-size:.82rem; color:var(--ink-soft); font-weight:600; }
 .fft-controles select{ font-size:.92rem; padding:.35rem .5rem; border-radius:6px; border:1px solid var(--line); background:#fff; }
-.fft-controles .note{ font-size:.78rem; color:var(--ink-soft); flex-basis:100%; }
+.note{ font-size:.82rem; color:var(--ink-soft); }
+.fft-controles .note{ font-size:.78rem; flex-basis:100%; }
 
 /* --------------------------------------------------------------- synthese */
 .synthese-niveaux{ display:flex; flex-wrap:wrap; gap:1rem; margin-bottom:1.2rem; }

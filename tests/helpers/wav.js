@@ -88,4 +88,51 @@ function ecrireWavFichier(cheminFichier, sampleRate, canaux) {
   fs.writeFileSync(cheminFichier, construireWav(sampleRate, canaux));
 }
 
-module.exports = { construireWav, genererTonPur, genererBruitBlanc, construireCalibrationTxt, ecrireWavFichier, amplitudePourNiveauDbfs };
+// Ecrit un WAV de bruit blanc directement en flux sur disque (par blocs),
+// sans jamais construire les canaux complets ni un gros buffer intermediaire
+// en memoire Node : necessaire pour generer un fichier de test de plusieurs
+// minutes (des dizaines de millions d'echantillons par voie) sans le
+// probleme de performance que ce test verifie justement cote outil.
+function ecrireBruitBlancWavStream(cheminFichier, { sampleRate = 44100, dureeS, nCh = 4, niveauDbfsRms, graine = 1234 }) {
+  const nSamples = Math.round(dureeS * sampleRate);
+  const dataSize = nSamples * nCh * 2;
+  const header = Buffer.alloc(44);
+  header.write("RIFF", 0, "ascii");
+  header.writeUInt32LE(36 + dataSize, 4);
+  header.write("WAVE", 8, "ascii");
+  header.write("fmt ", 12, "ascii");
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(nCh, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(sampleRate * nCh * 2, 28);
+  header.writeUInt16LE(nCh * 2, 32);
+  header.writeUInt16LE(16, 34);
+  header.write("data", 36, "ascii");
+  header.writeUInt32LE(dataSize, 40);
+  const fd = fs.openSync(cheminFichier, "w");
+  fs.writeSync(fd, header);
+
+  const sigma = Math.pow(10, niveauDbfsRms / 20);
+  let etat = graine;
+  function alea() { etat = (etat * 1664525 + 1013904223) >>> 0; return etat / 4294967296; }
+
+  const CHUNK_ECHANTILLONS = 65536; // par voie, entre deux ecritures disque
+  const buf = Buffer.alloc(CHUNK_ECHANTILLONS * nCh * 2);
+  let p = 0;
+  for (let i = 0; i < nSamples; i++) {
+    for (let c = 0; c < nCh; c++) {
+      const u1 = Math.max(alea(), 1e-12), u2 = alea();
+      const r = Math.sqrt(-2 * Math.log(u1));
+      const v = Math.max(-1, Math.min(1, sigma * r * Math.cos(2 * Math.PI * u2)));
+      buf.writeInt16LE(Math.round(v * 32767), p);
+      p += 2;
+    }
+    if (p >= buf.length) { fs.writeSync(fd, buf, 0, p); p = 0; }
+  }
+  if (p > 0) fs.writeSync(fd, buf, 0, p);
+  fs.closeSync(fd);
+  return { fs: sampleRate, dureeS, nCh };
+}
+
+module.exports = { construireWav, genererTonPur, genererBruitBlanc, construireCalibrationTxt, ecrireWavFichier, ecrireBruitBlancWavStream, amplitudePourNiveauDbfs };

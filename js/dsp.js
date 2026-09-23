@@ -49,12 +49,16 @@ const TAILLES_FFT_DISPONIBLES = [256,512,1024,2048,4096,8192,16384,32768,65536];
 const COURBE_MICRO_HZ = [20,30,50,70,100,200,500,1000,1500,2000,3000,4000,5000,6000,7000,8000,9000,10000,11000,12000,13000,14000,15000,16000,17000,18000,19000,20000];
 const COURBE_MICRO_DB = [-2.3,-1.3,-0.7,-0.4,-0.2,-0.1,0.0,-0.3,0.0,0.0,0.1,0.2,0.3,0.4,0.6,0.8,1.2,1.7,2.0,2.3,2.6,3.0,3.5,4.5,6.0,7.5,9.0,10.0];
 
+// Precalcule une seule fois (evite de reallouer/reconstruire ce tableau a
+// chaque appel : correctionMicroDb() est appelee jusqu'a plusieurs dizaines
+// de millions de fois lors du tracé du spectrogramme d'un fichier long).
+const LOG_COURBE_MICRO_HZ = COURBE_MICRO_HZ.map(v=>Math.log10(v));
+
 function correctionMicroDb(f) {
   const fc = Math.min(Math.max(f, COURBE_MICRO_HZ[0]), COURBE_MICRO_HZ[COURBE_MICRO_HZ.length-1]);
   const lf = Math.log10(Math.max(fc,1e-6));
-  const logTab = COURBE_MICRO_HZ.map(v=>Math.log10(v));
-  let i = 0; while (i < logTab.length-2 && lf > logTab[i+1]) i++;
-  const t = (lf - logTab[i]) / (logTab[i+1]-logTab[i] || 1);
+  let i = 0; while (i < LOG_COURBE_MICRO_HZ.length-2 && lf > LOG_COURBE_MICRO_HZ[i+1]) i++;
+  const t = (lf - LOG_COURBE_MICRO_HZ[i]) / (LOG_COURBE_MICRO_HZ[i+1]-LOG_COURBE_MICRO_HZ[i] || 1);
   return COURBE_MICRO_DB[i] + t*(COURBE_MICRO_DB[i+1]-COURBE_MICRO_DB[i]);
 }
 
@@ -136,13 +140,17 @@ function calculerPsd(signal, fs, params) {
 
   const nBins = nperseg / 2 + 1;
   const psdSum = new Float64Array(nBins);
+  const scale = 1.0 / (fs * winPower);
   let nSeg = 0;
+  // Buffers FFT reutilises d'un segment a l'autre plutot que realloues : sur
+  // un fichier de plusieurs minutes, ceci evite des milliers d'allocations
+  // de tableaux de la taille de la fenetre (source majeure de lenteur/GC).
+  const re = new Float64Array(nperseg), im = new Float64Array(nperseg);
 
   for (let start = 0; start + nperseg <= signal.length; start += step) {
-    const re = new Float64Array(nperseg), im = new Float64Array(nperseg);
     for (let i = 0; i < nperseg; i++) re[i] = signal[start+i] * fen[i];
+    im.fill(0);
     fft(re, im);
-    const scale = 1.0 / (fs * winPower);
     for (let k = 0; k < nBins; k++) {
       let p = (re[k]*re[k] + im[k]*im[k]) * scale;
       if (k > 0 && k < nBins - 1) p *= 2;   // energie des frequences negatives repliee
@@ -151,14 +159,19 @@ function calculerPsd(signal, fs, params) {
     nSeg++;
   }
   if (nSeg === 0) nSeg = 1;
-  const psd = psdSum.map(v => v / nSeg);
+  // Stocke le resultat en simple precision : les niveaux en dB n'ont pas
+  // besoin de la precision de Float64, et un fichier long avec de
+  // nombreuses combinaisons de parametres FFT explorees (mises en cache
+  // par voie dans app.js) reste ainsi sous une empreinte memoire raisonnable.
+  const psd = new Float32Array(nBins);
+  for (let k = 0; k < nBins; k++) psd[k] = psdSum[k] / nSeg;
   const freqs = new Float64Array(nBins);
   for (let k = 0; k < nBins; k++) freqs[k] = k * fs / nperseg;
   return { freqs, psd, df: fs / nperseg, nperseg };
 }
 
 /* STFT glissante pour le spectrogramme : meme formule par trame que
-   calculerPsd (une trame = un "segment" de Welch, sans moyenne), afin que
+   calculerPsd (un segment de Welch, sans moyenne sur l'axe temps), afin que
    le niveau colore du spectrogramme soit coherent avec le spectre en
    bande fine trace a cote. */
 const STFT_MAX_TRAMES = 3000;
@@ -166,16 +179,7 @@ const STFT_MAX_TRAMES = 3000;
 function calculerStft(signal, fs, params) {
   const nperseg = Math.min(params.nperseg, pow2Below(signal.length));
   const recouvrement = Math.min(Math.max(params.recouvrement, 0), 90);
-  let step = Math.max(1, Math.round(nperseg * (1 - recouvrement/100)));
-  // Une petite fenetre combinee a un fort recouvrement sur un enregistrement
-  // long produirait des millions de trames (plusieurs Go en memoire) : on
-  // elargit le pas au-dela de ce que demande le recouvrement choisi pour
-  // rester sous une limite raisonnable. La resolution frequentielle (nperseg)
-  // n'est elle jamais alteree.
-  const nTramesNaif = Math.floor((signal.length - nperseg) / step) + 1;
-  if (nTramesNaif > STFT_MAX_TRAMES) {
-    step = Math.ceil((signal.length - nperseg) / (STFT_MAX_TRAMES - 1));
-  }
+  const step = Math.max(1, Math.round(nperseg * (1 - recouvrement/100)));
   const { w: fen, winPower } = genererFenetre(params.fenetre, nperseg);
   const nBins = nperseg / 2 + 1;
   const scale = 1.0 / (fs * winPower);
@@ -183,22 +187,50 @@ function calculerStft(signal, fs, params) {
   const freqs = new Float64Array(nBins);
   for (let k = 0; k < nBins; k++) freqs[k] = k * fs / nperseg;
 
+  const nSegmentsNaif = Math.max(0, Math.floor((signal.length - nperseg) / step) + 1);
+  // Une petite fenetre combinee a un fort recouvrement sur un enregistrement
+  // long produirait des millions de trames (plusieurs Go en memoire) : au-
+  // dela d'une limite raisonnable, on regroupe par MOYENNE des segments
+  // consecutifs en une colonne affichee, plutot que d'elargir le pas entre
+  // segments (ce qui sauterait des portions entieres du signal : un
+  // evenement bref pourrait alors disparaitre du spectrogramme). La
+  // resolution frequentielle (nperseg) et le calcul des niveaux globaux et
+  // du spectre en bande fine (calculerPsd, independant) ne sont jamais
+  // alteres : seule la resolution temporelle AFFICHEE est reduite.
+  const groupe = nSegmentsNaif > STFT_MAX_TRAMES ? Math.ceil(nSegmentsNaif / STFT_MAX_TRAMES) : 1;
+
+  const re = new Float64Array(nperseg), im = new Float64Array(nperseg);
   const temps = [];
   const trames = [];
+  let colCourante = null, tempsSomme = 0, nDansGroupe = 0;
+
   for (let start = 0; start + nperseg <= signal.length; start += step) {
-    const re = new Float64Array(nperseg), im = new Float64Array(nperseg);
     for (let i = 0; i < nperseg; i++) re[i] = signal[start+i] * fen[i];
+    im.fill(0);
     fft(re, im);
-    const psd = new Float64Array(nBins);
+    if (colCourante === null) { colCourante = new Float64Array(nBins); tempsSomme = 0; nDansGroupe = 0; }
     for (let k = 0; k < nBins; k++) {
       let p = (re[k]*re[k] + im[k]*im[k]) * scale;
       if (k > 0 && k < nBins - 1) p *= 2;
-      psd[k] = p;
+      colCourante[k] += p;
     }
-    trames.push(psd);
-    temps.push((start + nperseg/2) / fs);
+    tempsSomme += (start + nperseg/2) / fs;
+    nDansGroupe++;
+    if (nDansGroupe === groupe) {
+      const col = new Float32Array(nBins);
+      for (let k = 0; k < nBins; k++) col[k] = colCourante[k] / nDansGroupe;
+      trames.push(col);
+      temps.push(tempsSomme / nDansGroupe);
+      colCourante = null;
+    }
   }
-  return { freqs, temps, trames, nperseg, df: fs / nperseg };
+  if (colCourante !== null && nDansGroupe > 0) {
+    const col = new Float32Array(nBins);
+    for (let k = 0; k < nBins; k++) col[k] = colCourante[k] / nDansGroupe;
+    trames.push(col);
+    temps.push(tempsSomme / nDansGroupe);
+  }
+  return { freqs, temps, trames, nperseg, df: fs / nperseg, tramesGroupees: groupe > 1 ? groupe : 0 };
 }
 
 /* ==================================================== reponse ponderee, dB, pour l'integration en bande */
@@ -296,8 +328,11 @@ function lireWav(buffer) {
 
   const nCh = fmt.numChannels;
   const nSamples = Math.floor(dataLength / 2 / nCh);
+  // Float32 (et non Float64) : precision largement suffisante pour une
+  // source 16 bits, et empreinte memoire divisee par deux sur un fichier
+  // de plusieurs minutes (canaux, puis le signal calibre qui en derive).
   const canaux = [];
-  for (let c = 0; c < nCh; c++) canaux.push(new Float64Array(nSamples));
+  for (let c = 0; c < nCh; c++) canaux.push(new Float32Array(nSamples));
   let p = dataOffset;
   for (let i = 0; i < nSamples; i++) {
     for (let c = 0; c < nCh; c++) {
