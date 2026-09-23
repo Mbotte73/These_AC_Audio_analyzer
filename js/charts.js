@@ -88,12 +88,28 @@ function tracerCourbe(canvas, series, opts) {
   ctx.fillText(opts.titre || "", M.l, 16);
 
   const logX = !!opts.logX;
-  let finiteYs = [];
-  for (const s of series) for (const v of s.ys) if (isFinite(v)) finiteYs.push(v);
-  let yMin = opts.yMin ?? Math.min(...finiteYs), yMax = opts.yMax ?? Math.max(...finiteYs);
+  const xMin = opts.xMin ?? series[0].xs[0], xMax = opts.xMax ?? series[0].xs[series[0].xs.length-1];
+  // Bornes Y calculees uniquement sur les points effectivement visibles dans
+  // le cadre (entre xMin et xMax) : un point hors bornes ne doit pas fausser
+  // l'echelle. Boucle plutot que Math.min/max(...tableau), qui peut lever une
+  // RangeError sur de tres grands tableaux (grande taille de FFT).
+  let yMin = opts.yMin, yMax = opts.yMax;
+  if (yMin === undefined || yMax === undefined) {
+    let mn = Infinity, mx = -Infinity;
+    for (const s of series) {
+      for (let i = 0; i < s.xs.length; i++) {
+        if (s.xs[i] < xMin || s.xs[i] > xMax) continue;
+        const v = s.ys[i];
+        if (!isFinite(v)) continue;
+        if (v < mn) mn = v;
+        if (v > mx) mx = v;
+      }
+    }
+    if (yMin === undefined) yMin = mn;
+    if (yMax === undefined) yMax = mx;
+  }
   if (!isFinite(yMin) || !isFinite(yMax)) { yMin = 0; yMax = 1; }
   if (yMax - yMin < 1) { yMax += 0.5; yMin -= 0.5; }
-  const xMin = opts.xMin ?? series[0].xs[0], xMax = opts.xMax ?? series[0].xs[series[0].xs.length-1];
 
   function px(x) {
     if (logX) return M.l + (Math.log10(Math.max(x,1e-6))-Math.log10(xMin))/(Math.log10(xMax)-Math.log10(xMin))*(w-M.l-M.r);
@@ -128,7 +144,12 @@ function tracerCourbe(canvas, series, opts) {
   ctx.strokeStyle = "#20242b"; ctx.lineWidth = 1;
   ctx.beginPath(); ctx.moveTo(M.l, M.t); ctx.lineTo(M.l, h-M.b); ctx.lineTo(w-M.r, h-M.b); ctx.stroke();
 
-  // courbes
+  // courbes — dessinees avec un clip sur le cadre de tracé : aucun point ne
+  // doit deborder du cadre, quelle que soit sa position calculee (point 2).
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(M.l, M.t, w-M.l-M.r, h-M.t-M.b);
+  ctx.clip();
   for (const s of series) {
     ctx.strokeStyle = s.couleur || "#0f4c5c"; ctx.lineWidth = 1.5;
     ctx.setLineDash(s.tirets || []);
@@ -136,12 +157,18 @@ function tracerCourbe(canvas, series, opts) {
     let started = false;
     for (let i=0;i<s.xs.length;i++){
       if (!isFinite(s.ys[i])) { started = false; continue; }
-      const x = px(s.xs[i]), y = py(s.ys[i]);
+      let xi = s.xs[i];
+      if (logX) {
+        if (xi <= 0) { started = false; continue; } // frequence nulle : log indefini, point exclu
+        if (xi < xMin) xi = xMin; // sous la borne visible : ramene au bord plutot que hors cadre
+      }
+      const x = px(xi), y = py(s.ys[i]);
       if (!started) { ctx.moveTo(x,y); started = true; } else ctx.lineTo(x,y);
     }
     ctx.stroke();
     ctx.setLineDash([]);
   }
+  ctx.restore();
 
   // legende
   if (legende) {
