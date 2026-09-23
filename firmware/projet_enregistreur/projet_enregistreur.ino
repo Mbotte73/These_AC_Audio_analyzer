@@ -86,10 +86,12 @@ bool horlogeFiable() {
 // ================================================================
 // MODIFIEZ CES QUATRE VALEURS APRES CHAQUE ETALONNAGE
 // ================================================================
-// Calcul : SPL_pleine_echelle = niveau_injecte - dBFS_mesure
-// (dBFS_mesure = la crete relevee sur le moniteur serie pendant
-// l'exposition au calibrateur, niveau_injecte = 94 ou 114 selon le
-// reglage du calibrateur, voir la procedure de calibration)
+// Calcul : SPL_pleine_echelle = niveau_injecte - dBFS_efficace
+// Utilisez la valeur "efficace (RMS)" affichee sur le moniteur serie a
+// l'arret de l'enregistrement, pas la valeur "crete", pour ce calcul.
+// Le dB SPL du calibrateur est par definition une valeur efficace ; la
+// valeur RMS mesuree ici l'est aussi, plus besoin de correction manuelle
+// de facteur de crete comme dans les versions precedentes de ce fichier.
 //
 // Laissez NAN pour une voie non encore calibree : le fichier de
 // metadonnees affichera alors A_COMPLETER pour cette voie, comme avant.
@@ -97,10 +99,10 @@ bool horlogeFiable() {
 // Apres modification : reprogrammez la carte, puis committez ce fichier
 // sur Git avec un message du type "Etalonnage du 2026-09-20", pour
 // garder un historique date de chaque calibration.
-const float CAL_VOIE_0 = NAN;   // exemple une fois calibre : 133.42f
-const float CAL_VOIE_1 = NAN;
-const float CAL_VOIE_2 = NAN;
-const float CAL_VOIE_3 = NAN;
+const float CAL_VOIE_0 = 134.4f;   // exemple une fois calibre : 133.42f
+const float CAL_VOIE_1 = 134.8f;
+const float CAL_VOIE_2 = 134.3f;
+const float CAL_VOIE_3 = 136.3f;
 
 const float calibrationVoie[4] = { CAL_VOIE_0, CAL_VOIE_1, CAL_VOIE_2, CAL_VOIE_3 };
 
@@ -138,6 +140,8 @@ uint32_t octetsData     = 0;
 uint32_t nbSaturations  = 0;
 uint32_t nbPertes       = 0;
 int16_t  creteVoie[NB_VOIES] = {0, 0, 0, 0};
+double   sommeCarresVoie[NB_VOIES] = {0, 0, 0, 0};   // pour le calcul RMS (efficace)
+uint32_t nbEchantillonsAccumules = 0;
 char     nomFichierActuel[24] = "";
 
 // confirmation visuelle apres fermeture d'un fichier
@@ -260,7 +264,7 @@ void ecrireMetadonnees(const char *nomWav, uint32_t dureeMs) {
   f.println();
   f.println("Calibration, a completer apres etalonnage :");
   f.println("  Injecter un niveau connu (ex. 94 dB SPL) et noter le dBFS obtenu.");
-  f.println("  SPL_pleine_echelle = niveau_injecte - dBFS_mesure");
+  f.println("  SPL_pleine_echelle = niveau_injecte - dBFS_efficace (RMS, pas crete)");
   f.println("  p(t) = (echantillon / 32768) * 20e-6 * 10^(SPL_pleine_echelle / 20)");
   for (int v = 0; v < 4; v++) {
     f.print("  voie "); f.print(v); f.print(", SPL_pleine_echelle (dB) = ");
@@ -288,7 +292,8 @@ void demarrerEnregistrement() {
 
   octetsData = 0;  idxTampon = 0;
   nbSaturations = 0;  nbPertes = 0;  saturation = false;
-  for (int i = 0; i < NB_VOIES; i++) creteVoie[i] = 0;
+  nbEchantillonsAccumules = 0;
+  for (int i = 0; i < NB_VOIES; i++) { creteVoie[i] = 0; sommeCarresVoie[i] = 0; }
   dernierFlushEntete = millis();
 
   q0.begin(); q1.begin(); q2.begin(); q3.begin();
@@ -317,11 +322,13 @@ void arreterEnregistrement() {
   Serial.print("Duree (s) : ");
   Serial.println((float)octetsData / (FE * NB_VOIES * NB_BITS / 8), 2);
   for (int i = 0; i < NB_VOIES; i++) {
+    double rms = (nbEchantillonsAccumules > 0) ? sqrt(sommeCarresVoie[i] / nbEchantillonsAccumules) : 0;
+    float dbfsCrete = 20.0f * log10f((float)creteVoie[i] / 32768.0f);
+    float dbfsRms   = (rms > 0) ? 20.0f * log10f((float)rms / 32768.0f) : -99.0f;
     Serial.print("Voie "); Serial.print(i);
     Serial.print(" crete = "); Serial.print(creteVoie[i]);
-    Serial.print(" soit ");
-    Serial.print(20.0f * log10f((float)creteVoie[i] / 32768.0f), 1);
-    Serial.println(" dBFS");
+    Serial.print(" soit "); Serial.print(dbfsCrete, 1); Serial.print(" dBFS");
+    Serial.print("   |   efficace (RMS) = "); Serial.print(dbfsRms, 1); Serial.println(" dBFS  <- utiliser celle-ci pour calibrer");
   }
   Serial.print("Echantillons satures : "); Serial.println(nbSaturations);
   Serial.print("Blocs perdus : ");         Serial.println(nbPertes);
@@ -367,7 +374,7 @@ void verifierFlushPeriodique() {
   dernierFlushEntete = maintenant;
 
   if (idxTampon > 0) {
-    if (fichierWav.write(tampon, idxTampon) != (int)idxTampon) { arretUrgenceSd(); return; }
+    if (fichierWav.write(tampon, idxTampon) != idxTampon) { arretUrgenceSd(); return; }
     octetsData += idxTampon;
     idxTampon = 0;
   }
@@ -399,6 +406,11 @@ void transfererBlocs() {
       if (a1 > creteVoie[1]) creteVoie[1] = a1;
       if (a2 > creteVoie[2]) creteVoie[2] = a2;
       if (a3 > creteVoie[3]) creteVoie[3] = a3;
+      sommeCarresVoie[0] += (double)v0[i] * v0[i];
+      sommeCarresVoie[1] += (double)v1[i] * v1[i];
+      sommeCarresVoie[2] += (double)v2[i] * v2[i];
+      sommeCarresVoie[3] += (double)v3[i] * v3[i];
+      nbEchantillonsAccumules++;
       if (a0 > SEUIL_SAT || a1 > SEUIL_SAT || a2 > SEUIL_SAT || a3 > SEUIL_SAT) {
         nbSaturations++;  saturation = true;
       }
