@@ -10,6 +10,21 @@
 
 function nomVoie(i) { return `Voie ${i+1}`; }
 
+// Badge de statut de calibration (point 5), visible directement sur
+// l'onglet de chaque voie : repere d'un coup d'oeil, sans naviguer vers
+// "Paramètres du capteur", si les niveaux affiches sont en dB SPL absolu
+// fiable ou en dBFS relatif. Couleur ET texte portent l'information (pas
+// la couleur seule).
+function creerBadgeCalibration(calibre) {
+  const badge = document.createElement("span");
+  badge.className = "badge-cal " + (calibre ? "calibre" : "non-calibre");
+  badge.textContent = calibre ? "dB SPL" : "dBFS";
+  badge.title = calibre
+    ? "Voie étalonnée : niveaux en dB SPL absolu."
+    : "Voie non étalonnée : niveaux en dBFS relatif, pas de dB SPL absolu fiable.";
+  return badge;
+}
+
 let wavData = null, txtTexte = null;
 let calibration = null;
 let resultatsBase = [];      // par voie : grandeurs independantes des parametres FFT
@@ -154,6 +169,16 @@ function uniteCourante() {
   return resultatsBase.some(r=>r.calibre) ? "dB SPL" : "dBFS (non calibré)";
 }
 
+// Unite propre a une voie : uniteCourante() renvoie "dB SPL" des qu'UNE
+// voie est etalonnee, ce qui affichait a tort une voie non etalonnee d'un
+// fichier mixte comme si elle etait en dB SPL absolu. Utilisee dans
+// l'onglet de chaque voie (cartes de niveaux, axes), a la difference de
+// l'onglet Comparaison qui reste sur uniteCourante() (plusieurs voies sur
+// le meme graphique).
+function uniteVoie(v) {
+  return resultatsBase[v].calibre ? "dB SPL" : "dBFS (non calibré)";
+}
+
 /* -------------------------------------------------------- acces aux resultats FFT (caches) */
 function cleFft() { return `${fftParams.nperseg}|${fftParams.recouvrement}|${fftParams.fenetre}`; }
 
@@ -211,8 +236,16 @@ function construireInterface() {
 
   for (const o of onglets) {
     const btn = document.createElement("button");
-    btn.type = "button"; btn.textContent = o.label; btn.dataset.onglet = o.id;
+    btn.type = "button"; btn.dataset.onglet = o.id;
     btn.addEventListener("click", ()=>activerOnglet(o.id));
+
+    if (o.id.startsWith("voie")) {
+      const v = parseInt(o.id.slice(4), 10);
+      btn.appendChild(document.createTextNode(o.label + " "));
+      btn.appendChild(creerBadgeCalibration(resultatsBase[v].calibre));
+    } else {
+      btn.textContent = o.label;
+    }
     nav.appendChild(btn);
 
     const div = document.createElement("div");
@@ -308,7 +341,7 @@ function creerTitreImpression(texte) {
 
 function rendreOngletVoie(v, conteneur) {
   const r = resultatsBase[v];
-  const unite = uniteCourante();
+  const unite = uniteVoie(v);
   conteneur.innerHTML = "";
   conteneur.appendChild(creerTitreImpression(`${nomVoie(v)} — ${r.calibre ? "étalonnée, dB SPL" : "non étalonnée, dBFS"}`));
   conteneur.appendChild(creerControlesFft(r.pression.length));
@@ -487,8 +520,9 @@ function construirePanelSynthese() {
   panel.className = "panel";
   panel.innerHTML = `<h2>Synthèse — ${wavData.nomFichier}</h2>` +
     (uneCalibree ? "" : `<div class="avertissement">Étalonnage non renseigné pour au moins une voie : les niveaux affichés sont en dBFS relatif, pas en dB SPL absolu.</div>`) +
-    `<table><thead><tr><th>Voie</th><th>OASPL (${unite})</th><th>LAeq (${unite})</th><th>LCeq (${unite})</th><th>LCpeak (${unite})</th><th>LAFmax (${unite})</th></tr></thead><tbody>` +
-    resultatsBase.map(r=>`<tr><td>${nomVoie(r.voie)}</td><td>${r.leqZ.toFixed(1)}</td><td>${r.leqA.toFixed(1)}</td><td>${r.leqC.toFixed(1)}</td><td>${r.lcpeak.toFixed(1)}</td><td>${r.lafmax.toFixed(1)}</td></tr>`).join("") +
+    `<table><thead><tr><th>Voie</th><th>OASPL (${unite})</th><th>LAeq (${unite})</th><th>LCeq (${unite})</th><th>LCpeak (${unite})</th><th>LAFmax (${unite})</th><th>État</th></tr></thead><tbody>` +
+    resultatsBase.map(r=>`<tr><td>${nomVoie(r.voie)}</td><td>${r.leqZ.toFixed(1)}</td><td>${r.leqA.toFixed(1)}</td><td>${r.leqC.toFixed(1)}</td><td>${r.lcpeak.toFixed(1)}</td><td>${r.lafmax.toFixed(1)}</td>` +
+      `<td><span class="badge-cal ${r.calibre ? "calibre" : "non-calibre"}" title="${r.calibre ? "Voie étalonnée : niveaux en dB SPL absolu." : "Voie non étalonnée : niveaux en dBFS relatif, pas de dB SPL absolu fiable."}">${r.calibre ? "dB SPL" : "dBFS"}</span></td></tr>`).join("") +
     `</tbody></table>
      <dl class="lexique" style="margin-top:.8rem;">
        <dt>OASPL</dt><dd>niveau global non pondéré (linéaire), sur toute la durée.</dd>

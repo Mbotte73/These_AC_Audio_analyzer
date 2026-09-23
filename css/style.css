@@ -68,6 +68,18 @@ canvas.chart.spectrogramme{ height:380px; }
 }
 .tabs button.actif{ background:var(--brand); color:#fff; border-color:var(--brand); }
 .tabs button:hover:not(.actif){ background:var(--brand-soft); color:var(--ink); }
+/* Badge de statut de calibration (point 6), sur l'onglet de chaque voie et
+   dans le tableau de synthese : repere d'un coup d'oeil si les niveaux
+   affiches sont en dB SPL absolu fiable ou en dBFS relatif, sans avoir a
+   ouvrir l'onglet "Parametres du capteur". */
+.badge-cal{
+  display:inline-block; font-size:.68rem; font-weight:700; letter-spacing:.02em;
+  padding:.1rem .4rem; border-radius:4px; margin-left:.3rem; vertical-align:middle;
+}
+.badge-cal.calibre{ background:#e1f3e6; color:#1d6b3a; }
+.badge-cal.non-calibre{ background:var(--warn-bg); color:var(--warn-ink); }
+.tabs button.actif .badge-cal.calibre{ background:#bfe8cc; color:#0c3c1f; }
+.tabs button.actif .badge-cal.non-calibre{ background:#f6d9c6; color:#5c2410; }
 .onglet-contenu{ display:none; }
 .onglet-contenu.actif{ display:block; }
 /* Rendu de tous les onglets pendant preparerVueImpression() (app.js) : les
