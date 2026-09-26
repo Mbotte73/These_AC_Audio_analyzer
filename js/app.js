@@ -233,6 +233,7 @@ function construireInterface() {
   for (let v = 0; v < wavData.nCh; v++) onglets.push({ id: `voie${v}`, label: nomVoie(v) });
   onglets.push({ id: "comparaison", label: "Comparaison" });
   onglets.push({ id: "capteur", label: "Paramètres du capteur" });
+  onglets.push({ id: "vol", label: "Vol" });
 
   for (const o of onglets) {
     const btn = document.createElement("button");
@@ -266,6 +267,7 @@ function activerOnglet(id) {
   if (id.startsWith("voie")) rendreOngletVoie(parseInt(id.slice(4),10), conteneur);
   else if (id === "comparaison") rendreOngletComparaison(conteneur);
   else if (id === "capteur") rendreOngletCapteur(conteneur);
+  else if (id === "vol") rendreOngletVol(conteneur);
 }
 
 function rafraichirOngletActif() { activerOnglet(ongletActif); }
@@ -284,6 +286,7 @@ function preparerVueImpression() {
   for (let v = 0; v < wavData.nCh; v++) rendreOngletVoie(v, document.getElementById(`contenu-voie${v}`));
   rendreOngletComparaison(document.getElementById("contenu-comparaison"));
   rendreOngletCapteur(document.getElementById("contenu-capteur"));
+  rendreOngletVol(document.getElementById("contenu-vol"));
   viderDessinsEnAttente();
   document.body.classList.remove("impression");
 }

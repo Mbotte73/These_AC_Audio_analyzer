@@ -116,6 +116,22 @@ canvas.chart.spectrogramme{ height:380px; }
 .lexique dt{ font-weight:600; color:var(--ink); }
 .lexique dd{ margin:0 0 .4rem; }
 
+/* -------------------------------------------------------------------- vol */
+.vol-depots{ display:flex; flex-wrap:wrap; gap:1rem; margin:1rem 0; }
+.vol-depot{ background:var(--brand-soft); border-radius:8px; padding:.8rem 1rem; flex:1 1 260px; min-width:230px; }
+.vol-depot-titre{ font-size:.86rem; font-weight:600; color:var(--brand); margin-bottom:.5rem; }
+.vol-decalage{ display:flex; align-items:center; gap:.4rem; font-size:.82rem; color:var(--ink-soft); margin-top:.5rem; }
+.vol-decalage input{ width:70px; padding:.25rem .4rem; border-radius:5px; border:1px solid var(--line); }
+.vol-outils{ margin-bottom:.6rem; }
+.vol-layout{ display:grid; grid-template-columns:1.3fr 1fr; gap:1.2rem; align-items:stretch; }
+.vol-col-gauche{ display:flex; flex-direction:column; }
+.vol-col-droite{ display:flex; flex-direction:column; }
+.vol-map{ flex:1 1 auto; min-height:420px; border:1px solid var(--line); border-radius:8px; background:#e9e7e1; }
+@media (max-width: 900px){
+  .vol-layout{ grid-template-columns:1fr; }
+  .vol-map{ min-height:340px; }
+}
+
 footer{ text-align:center; color:var(--ink-soft); font-size:.82rem; padding:1rem 0 2.5rem; }
 
 @media print{
