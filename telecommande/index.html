@@ -194,6 +194,11 @@
 <body>
 
 <h1>Telecommande phyphox</h1>
+<!-- Numero de version, incremente a la main a chaque modification (voir
+     VERSION_TELECOMMANDE plus bas dans le script). Sert a confirmer d'un
+     coup d'oeil, sur le telephone, qu'une mise a jour a bien ete recuperee
+     — sans ca, rien ne distingue une ancienne version d'une nouvelle. -->
+<div id="version-telecommande" style="text-align:center; font-size:0.75em; color:var(--gris); margin:-10px 0 14px;"></div>
 
 <div class="bloc-confirmation" id="bloc-confirmation" style="display:none;">
   <div class="confirmation-texte" id="confirmation-texte"></div>
@@ -205,7 +210,6 @@
   <button class="bouton-global arreter" onclick="toutFaire('stop')">ARRETER TOUT</button>
 </div>
 <div class="bloc-global-secondaire">
-  <button class="bouton-global-secondaire" onclick="exporterTout()">Exporter tout</button>
   <button class="bouton-global-secondaire" onclick="effacerTout()">Effacer tout</button>
 </div>
 
@@ -219,10 +223,17 @@
   <br><br>
   Pour un vol : DEMARRER TOUT au decollage (demarre les esclaves ; le GPS du master se lance a la main, directement dans phyphox). A l'atterrissage, ARRETER TOUT arrete chaque esclave puis enchaine sur l'export : un bloc orange apparait en haut de la page, avec un bouton a appuyer pour chaque fichier ("Fichier suivant"). C'est volontaire : Chrome bloque parfois un telechargement qui n'est pas declenche par un appui direct, donc chaque fichier attend maintenant un vrai appui plutot que de s'enchainer tout seul en silence (et de risquer d'en perdre un). Les fichiers arrivent dans le dossier Telechargements du master ; il faudra les recuperer depuis le master a la fin de la journee (cable, Drive...), mais plus besoin d'aller sur les esclaves.
   <br><br>
-  Entre deux vols, sans toucher les esclaves : une fois l'export automatique termine (voir le journal), appuyez sur "Effacer tout" pour vider la memoire de chaque esclave et repartir propre avant le vol suivant. Le bouton "Exporter tout" reste disponible separement si vous voulez re-exporter a un autre moment.
+  Entre deux vols, sans toucher les esclaves : une fois l'export automatique termine (voir le journal), appuyez sur "Effacer tout" pour vider la memoire de chaque esclave et repartir propre avant le vol suivant. Besoin de re-exporter un appareil precis a part ? Utilisez le bouton "Exporter" individuel, sous sa fiche.
 </div>
 
 <script>
+// A incrementer a chaque modification de cette page (avec une courte
+// description), pour pouvoir verifier sur le telephone, apres un
+// deploiement, que la mise a jour a bien ete recuperee plutot que de se
+// fier a l'impression que "ca a l'air de marcher".
+const VERSION_TELECOMMANDE = "1.2 — 27 sept. 2026 (retrait du bouton Exporter tout)";
+document.getElementById("version-telecommande").textContent = "v" + VERSION_TELECOMMANDE;
+
 const CLE_STOCKAGE = "phyphox_appareils";
 
 function chargerAppareils() {
@@ -375,36 +386,51 @@ function ouvrirSequence(etapes, libelle, onTermine) {
 // ---------------------------------------------------------------- exports
 // Un export declenche un telechargement de fichier. Chrome Android bloque
 // (ou demande une autorisation qui disparait vite) tout telechargement qui
-// n'est pas directement declenche par un appui de l'utilisateur : dans
-// l'ancienne version, seul le tout premier fichier de la sequence suivait un
-// vrai clic — tous les suivants partaient d'un setTimeout, donc consideres
-// par Chrome comme "automatiques" et parfois bloques silencieusement.
-// Solution : on ne telecharge plus qu'un seul fichier par appui reel. Le
-// premier export part du clic sur le bouton ; les suivants attendent que
-// l'operateur appuie explicitement sur "Fichier suivant" (bloc orange en
-// haut de page), ce qui constitue a chaque fois un nouveau geste utilisateur
-// valide pour Chrome.
-let exportGuide = null; // { fenetre, actifs, declenches, libelle }
+// n'est pas directement declenche par un appui de l'utilisateur : chaque
+// fichier attend donc un appui explicite sur "Fichier suivant" (bloc orange
+// en haut de page), ce qui constitue a chaque fois un nouveau geste
+// utilisateur valide pour Chrome.
+//
+// Point important (bug corrige) : chaque fichier s'ouvre desormais dans son
+// PROPRE onglet, jamais reutilise pour le fichier suivant. La version
+// precedente redirigeait le meme onglet (fenetre.location.href = ...) vers
+// l'adresse suivante des l'appui sur "Fichier suivant" : si le
+// telechargement du fichier precedent n'avait pas fini de demarrer, cette
+// redirection l'interrompait — et le fichier n'etait jamais enregistre,
+// sans aucune erreur visible dans le journal. Avec un onglet independant par
+// fichier, ce risque n'existe plus, quel que soit le rythme des appuis.
+let exportGuide = null; // { actifs, declenches, libelle }
+
+// Delai avant fermeture automatique de l'onglet d'un export, large pour
+// laisser le temps au telechargement de vraiment se terminer (fichier de
+// plusieurs minutes d'enregistrement, reseau local parfois lent) sans
+// dependre du rythme auquel l'operateur appuie sur les boutons.
+const DELAI_FERMETURE_EXPORT_MS = 6000;
+
+function ouvrirExportUnique(appareil, numero, total) {
+  const fenetre = window.open(construireUrlExport(appareil.adresse), "_blank");
+  if (!fenetre) {
+    journaliser("Pop-up bloque par le navigateur. Autorisez les pop-up pour cette page, puis reessayez.");
+    return false;
+  }
+  journaliser((appareil.nom || "Appareil") + " : export (" + numero + "/" + total + ") declenche.");
+  setTimeout(() => { try { fenetre.close(); } catch (e) {} }, DELAI_FERMETURE_EXPORT_MS);
+  return true;
+}
 
 function demarrerExportsGuides(actifs, libelle) {
   if (actifs.length === 0) {
     journaliser("Aucune adresse configuree pour l'export.");
     return;
   }
-  const fenetre = window.open(construireUrlExport(actifs[0].adresse), "_blank");
-  if (!fenetre) {
-    journaliser("Pop-up bloque par le navigateur. Autorisez les pop-up pour cette page, puis reessayez.");
-    return;
-  }
-  journaliser((actifs[0].nom || "Appareil") + " : export (1/" + actifs.length + ") declenche.");
+  if (!ouvrirExportUnique(actifs[0], 1, actifs.length)) return;
 
   if (actifs.length === 1) {
-    setTimeout(() => { try { fenetre.close(); } catch (e) {} }, 3000);
     journaliser("=== " + libelle + " termine ===");
     return;
   }
 
-  exportGuide = { fenetre, actifs, declenches: 1, libelle };
+  exportGuide = { actifs, declenches: 1, libelle };
   afficherBoutonExportSuivant();
 }
 
@@ -414,10 +440,10 @@ function afficherBoutonExportSuivant() {
   const bouton = document.getElementById("confirmation-bouton");
   const { actifs, declenches } = exportGuide;
   if (declenches < actifs.length) {
-    texte.textContent = "Fichier " + declenches + "/" + actifs.length + " recupere. Chrome peut demander une autorisation avant le suivant : appuyez ci-dessous des que le fichier precedent est arrive dans Telechargements.";
+    texte.textContent = "Fichier " + declenches + "/" + actifs.length + " declenche (verifiez son arrivee dans Telechargements). Appuyez ci-dessous pour lancer le suivant.";
     bouton.textContent = "Fichier suivant (" + (declenches + 1) + "/" + actifs.length + ")";
   } else {
-    texte.textContent = "Dernier fichier (" + actifs.length + "/" + actifs.length + ") declenche. Appuyez pour terminer.";
+    texte.textContent = "Tous les fichiers ont ete declenches. Appuyez pour fermer ce bandeau.";
     bouton.textContent = "Terminer";
   }
   bloc.style.display = "block";
@@ -425,10 +451,9 @@ function afficherBoutonExportSuivant() {
 
 function confirmerExportSuivant() {
   if (!exportGuide) return;
-  const { fenetre, actifs, declenches, libelle } = exportGuide;
+  const { actifs, declenches, libelle } = exportGuide;
 
   if (declenches >= actifs.length) {
-    try { fenetre.close(); } catch (e) {}
     document.getElementById("bloc-confirmation").style.display = "none";
     journaliser("=== " + libelle + " termine ===");
     exportGuide = null;
@@ -436,12 +461,7 @@ function confirmerExportSuivant() {
   }
 
   const a = actifs[declenches];
-  try {
-    fenetre.location.href = construireUrlExport(a.adresse);
-    journaliser((a.nom || "Appareil") + " : export (" + (declenches + 1) + "/" + actifs.length + ") declenche.");
-  } catch (e) {
-    journaliser("Erreur : " + e.message);
-  }
+  ouvrirExportUnique(a, declenches + 1, actifs.length);
   exportGuide.declenches++;
   afficherBoutonExportSuivant();
 }
@@ -466,11 +486,6 @@ function toutFaire(cmd) {
     "Arret",
     () => demarrerExportsGuides(actifs, "Export apres arret")
   );
-}
-
-function exporterTout() {
-  journaliser("=== EXPORT GLOBAL (un appui par fichier) ===");
-  demarrerExportsGuides(appareils.filter((a) => a.adresse), "Export");
 }
 
 function effacerTout() {
