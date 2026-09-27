@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Telecommande phyphox</title>
+<style>
+  :root {
+    --vert: #2e7d32;
+    --vert-fonce: #1b5e20;
+    --rouge: #c62828;
+    --rouge-fonce: #8e0000;
+    --gris: #555;
+    --fond: #f4f4f4;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    background: var(--fond);
+    margin: 0;
+    padding: 16px;
+    color: #222;
+  }
+  h1 {
+    font-size: 1.3em;
+    text-align: center;
+    margin: 4px 0 16px 0;
+  }
+  .bloc-global {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  .bouton-global {
+    flex: 1;
+    padding: 22px 10px;
+    font-size: 1.15em;
+    font-weight: bold;
+    color: white;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  .bouton-global.demarrer { background: var(--vert); }
+  .bouton-global.demarrer:active { background: var(--vert-fonce); }
+  .bouton-global.arreter { background: var(--rouge); }
+  .bouton-global.arreter:active { background: var(--rouge-fonce); }
+
+  .bloc-global-secondaire {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  .bouton-global-secondaire {
+    flex: 1;
+    padding: 12px 10px;
+    font-size: 0.95em;
+    font-weight: bold;
+    color: white;
+    background: #37474f;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+
+  .carte-appareil {
+    background: white;
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin-bottom: 12px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+  }
+  .carte-appareil h2 {
+    font-size: 1em;
+    margin: 0 0 8px 0;
+  }
+  .ligne-adresse {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+  .ligne-adresse input {
+    flex: 1;
+    padding: 8px;
+    font-size: 0.95em;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+  }
+  .ligne-boutons {
+    display: flex;
+    gap: 8px;
+  }
+  .ligne-boutons button {
+    flex: 1;
+    padding: 10px;
+    font-size: 0.95em;
+    font-weight: bold;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  .ligne-boutons button.demarrer { background: var(--vert); }
+  .ligne-boutons button.arreter { background: var(--rouge); }
+  .ligne-boutons button.exporter { background: #37474f; }
+  .ligne-boutons button.effacer { background: #8d6e00; }
+  .ligne-boutons2 {
+    display: flex;
+    gap: 8px;
+    margin-top: 6px;
+  }
+  .ligne-boutons2 button {
+    flex: 1;
+    padding: 8px;
+    font-size: 0.85em;
+    font-weight: bold;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  .statut {
+    margin-top: 6px;
+    font-size: 0.85em;
+    color: var(--gris);
+  }
+  .bloc-journal {
+    background: #1e1e1e;
+    color: #d4d4d4;
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-family: Consolas, Menlo, monospace;
+    font-size: 0.8em;
+    height: 160px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    margin-top: 8px;
+  }
+  .titre-journal {
+    font-size: 0.9em;
+    color: var(--gris);
+    margin: 16px 0 4px 0;
+  }
+  .aide {
+    font-size: 0.8em;
+    color: var(--gris);
+    margin-top: 16px;
+    line-height: 1.4;
+  }
+</style>
+</head>
+<body>
+
+<h1>Telecommande phyphox</h1>
+
+<div class="bloc-global">
+  <button class="bouton-global demarrer" onclick="toutFaire('start')">DEMARRER TOUT</button>
+  <button class="bouton-global arreter" onclick="toutFaire('stop')">ARRETER TOUT</button>
+</div>
+<div class="bloc-global-secondaire">
+  <button class="bouton-global-secondaire" onclick="exporterTout()">Exporter tout</button>
+  <button class="bouton-global-secondaire" onclick="effacerTout()">Effacer tout</button>
+</div>
+
+<div id="conteneur-appareils"></div>
+
+<div class="titre-journal">Journal</div>
+<div class="bloc-journal" id="journal"></div>
+
+<div class="aide">
+  Saisissez une seule fois le nom et l'adresse de chaque esclave (adresse affichee dans phyphox, onglet "Remote access", par exemple 192.168.43.23:8080). Tout est memorise sur ce telephone/navigateur.
+  <br><br>
+  Pour un vol : DEMARRER TOUT au decollage (demarre les esclaves ; le GPS du master se lance a la main, directement dans phyphox). A l'atterrissage, ARRETER TOUT arrete ET exporte automatiquement les donnees de chaque esclave (telechargees sur le master, au format CSV) — pour ne jamais oublier l'export. Les fichiers arrivent dans le dossier Telechargements du master ; il faudra les recuperer depuis le master a la fin de la journee (cable, Drive...), mais plus besoin d'aller sur les esclaves.
+  <br><br>
+  Entre deux vols, sans toucher les esclaves : une fois l'export automatique termine (voir le journal), appuyez sur "Effacer tout" pour vider la memoire de chaque esclave et repartir propre avant le vol suivant. Le bouton "Exporter tout" reste disponible separement si vous voulez re-exporter a un autre moment.
+</div>
+
+<script>
+const CLE_STOCKAGE = "phyphox_appareils";
+
+function chargerAppareils() {
+  try {
+    const brut = localStorage.getItem(CLE_STOCKAGE);
+    if (brut) {
+      const liste = JSON.parse(brut);
+      if (Array.isArray(liste) && liste.length > 0) return liste;
+    }
+  } catch (e) {}
+  return [
+    { nom: "Esclave 1", adresse: "" },
+    { nom: "Esclave 2", adresse: "" }
+  ];
+}
+
+function sauverAppareils(liste) {
+  try {
+    localStorage.setItem(CLE_STOCKAGE, JSON.stringify(liste));
+  } catch (e) {}
+}
+
+let appareils = chargerAppareils();
+
+function journaliser(texte) {
+  const zone = document.getElementById("journal");
+  const heure = new Date().toLocaleTimeString();
+  zone.textContent += "[" + heure + "] " + texte + "\n";
+  zone.scrollTop = zone.scrollHeight;
+}
+
+function majAdresse(index, valeur) {
+  appareils[index].adresse = valeur.trim();
+  sauverAppareils(appareils);
+}
+
+function majNom(index, valeur) {
+  appareils[index].nom = valeur.trim();
+  sauverAppareils(appareils);
+}
+
+function ajouterAppareil() {
+  appareils.push({ nom: "Appareil " + (appareils.length + 1), adresse: "" });
+  sauverAppareils(appareils);
+  dessiner();
+}
+
+function supprimerAppareil(index) {
+  appareils.splice(index, 1);
+  sauverAppareils(appareils);
+  dessiner();
+}
+
+function baseUrl(adresse) {
+  let base = adresse;
+  if (!base.startsWith("http://") && !base.startsWith("https://")) {
+    base = "http://" + base;
+  }
+  return base.replace(/\/$/, "");
+}
+
+function construireUrl(adresse, cmd) {
+  return baseUrl(adresse) + "/control?cmd=" + cmd;
+}
+
+// format=2 correspond au CSV cote phyphox (0 = Excel, 2 = CSV).
+function construireUrlExport(adresse) {
+  return baseUrl(adresse) + "/export?format=2";
+}
+
+// Ni fetch() ni iframe ne fonctionnent de maniere fiable depuis une page
+// ouverte via un gestionnaire de fichiers (content://). En revanche une
+// vraie navigation (comme taper l'adresse dans Chrome, ou comme un
+// telechargement declenche par un lien) fonctionne toujours. On declenche
+// donc chaque action en ouvrant un nouvel onglet sur l'URL voulue, puis on
+// le referme tout seul juste apres (sauf pour un export, ou le navigateur
+// gere lui-meme le telechargement puis on referme).
+function ouvrirUnOnglet(url, dureeAvantFermeture) {
+  const fenetre = window.open(url, "_blank");
+  journaliser(url + " -> onglet ouvert");
+  if (fenetre) {
+    setTimeout(() => {
+      try { fenetre.close(); } catch (e) {}
+    }, dureeAvantFermeture || 1500);
+    return true;
+  }
+  journaliser("Le navigateur a peut-etre bloque l'ouverture (pop-up). Verifiez l'autorisation des pop-up pour cette page.");
+  return false;
+}
+
+function commanderUn(index, cmd) {
+  const a = appareils[index];
+  if (!a.adresse) { journaliser("Adresse vide, commande ignoree."); return; }
+  journaliser((a.nom || "Appareil") + " : envoi " + cmd + "...");
+  ouvrirUnOnglet(construireUrl(a.adresse, cmd), 1500);
+}
+
+function exporterUn(index) {
+  const a = appareils[index];
+  if (!a.adresse) { journaliser("Adresse vide, export ignore."); return; }
+  journaliser((a.nom || "Appareil") + " : export...");
+  ouvrirUnOnglet(construireUrlExport(a.adresse), 3000);
+}
+
+// Un seul onglet, navigue successivement vers chaque etape de la liste, puis
+// se referme. Necessaire car la plupart des navigateurs mobiles bloquent
+// l'ouverture de plusieurs fenetres depuis un seul clic (bloqueur de pop-up).
+// "etapes" est un tableau de { url, delai } — le delai est celui a attendre
+// APRES avoir charge cette URL avant de passer a la suivante (ou de fermer
+// l'onglet si c'est la derniere).
+function ouvrirSequence(etapes, libelle) {
+  if (etapes.length === 0) {
+    journaliser("Aucune adresse configuree.");
+    return;
+  }
+  const fenetre = window.open(etapes[0].url, "_blank");
+  if (!fenetre) {
+    journaliser("Pop-up bloque par le navigateur. Autorisez les pop-up pour cette page, puis reessayez.");
+    return;
+  }
+  journaliser(etapes[0].url + " -> onglet ouvert (1/" + etapes.length + ")");
+
+  let i = 1;
+  function suivante() {
+    if (i >= etapes.length) {
+      setTimeout(() => {
+        try { fenetre.close(); } catch (e) {}
+      }, etapes[etapes.length - 1].delai);
+      journaliser("=== " + libelle + " termine ===");
+      return;
+    }
+    setTimeout(() => {
+      try {
+        fenetre.location.href = etapes[i].url;
+        journaliser(etapes[i].url + " -> onglet redirige (" + (i + 1) + "/" + etapes.length + ")");
+      } catch (e) {
+        journaliser("Erreur de redirection : " + e.message);
+      }
+      i++;
+      suivante();
+    }, etapes[i - 1].delai);
+  }
+  suivante();
+}
+
+function toutFaire(cmd) {
+  const estArret = cmd === "stop";
+  journaliser("=== " + (estArret ? "ARRET" : "DEMARRAGE") + " GLOBAL " + (estArret ? "+ EXPORT " : "") + "===");
+
+  const actifs = appareils.filter((a) => a.adresse);
+  let etapes = actifs.map((a) => ({ url: construireUrl(a.adresse, cmd), delai: 900 }));
+
+  // Au clic sur ARRETER TOUT, on enchaine directement sur l'export de
+  // chaque appareil, pour ne jamais oublier de recuperer les donnees.
+  if (estArret) {
+    etapes = etapes.concat(actifs.map((a) => ({ url: construireUrlExport(a.adresse), delai: 2500 })));
+  }
+
+  ouvrirSequence(etapes, estArret ? "Arret + export" : "Demarrage");
+}
+
+function exporterTout() {
+  journaliser("=== EXPORT GLOBAL ===");
+  // Un export telecharge un fichier, ca prend un peu plus de temps qu'une
+  // simple commande start/stop : on laisse plus de marge entre deux etapes.
+  const etapes = appareils.filter((a) => a.adresse).map((a) => ({ url: construireUrlExport(a.adresse), delai: 2500 }));
+  ouvrirSequence(etapes, "Export");
+}
+
+function effacerTout() {
+  journaliser("=== EFFACEMENT GLOBAL ===");
+  const etapes = appareils.filter((a) => a.adresse).map((a) => ({ url: construireUrl(a.adresse, "clear"), delai: 900 }));
+  ouvrirSequence(etapes, "Effacement");
+}
+
+function dessiner() {
+  const conteneur = document.getElementById("conteneur-appareils");
+  conteneur.innerHTML = "";
+  appareils.forEach((a, index) => {
+    const carte = document.createElement("div");
+    carte.className = "carte-appareil";
+    carte.innerHTML = `
+      <div class="ligne-adresse">
+        <input type="text" placeholder="nom (ex: Master GPS)"
+               value="${a.nom || ""}"
+               oninput="majNom(${index}, this.value)"
+               style="flex: 0 0 40%; font-weight: bold;">
+        <input type="text" placeholder="ex: 192.168.43.23:8080"
+               value="${a.adresse || ""}"
+               oninput="majAdresse(${index}, this.value)">
+      </div>
+      <div class="ligne-boutons">
+        <button class="demarrer" onclick="commanderUn(${index}, 'start')">Demarrer</button>
+        <button class="arreter" onclick="commanderUn(${index}, 'stop')">Arreter</button>
+        <button onclick="supprimerAppareil(${index})" style="flex: 0 0 auto; background: #999;">&times;</button>
+      </div>
+      <div class="ligne-boutons2">
+        <button class="exporter" onclick="exporterUn(${index})">Exporter</button>
+        <button class="effacer" onclick="commanderUn(${index}, 'clear')">Effacer</button>
+      </div>
+    `;
+    conteneur.appendChild(carte);
+  });
+  const boutonAjout = document.createElement("button");
+  boutonAjout.textContent = "+ Ajouter un appareil";
+  boutonAjout.style.cssText = "width:100%; padding:10px; margin-top:4px; border-radius:8px; border:1px dashed #999; background:white; color:#555; font-size:0.9em;";
+  boutonAjout.onclick = ajouterAppareil;
+  conteneur.appendChild(boutonAjout);
+}
+
+dessiner();
+journaliser("Page prete. " + appareils.length + " appareil(s) configure(s).");
+</script>
+
+</body>
+</html>
