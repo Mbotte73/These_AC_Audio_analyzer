@@ -4,6 +4,17 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Telecommande phyphox</title>
+<!-- Rend la page installable et utilisable hors reseau (PWA) : une fois
+     ouverte une premiere fois avec du reseau, le service worker garde une
+     copie locale de la page et de ses icones, donc les ouvertures suivantes
+     depuis l'icone sur l'ecran d'accueil fonctionnent meme sans aucun
+     acces internet (le pilotage des esclaves phyphox, lui, a toujours
+     fonctionne sans internet : c'etait uniquement le chargement de cette
+     page elle-meme qui en avait besoin jusqu'ici). -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#2e7d32">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
 <style>
   :root {
     --vert: #2e7d32;
@@ -151,11 +162,43 @@
     margin-top: 16px;
     line-height: 1.4;
   }
+  .bloc-confirmation {
+    background: #ffb300;
+    border: 2px solid #e65100;
+    border-radius: 10px;
+    padding: 14px;
+    margin-bottom: 20px;
+    text-align: center;
+  }
+  .bloc-confirmation .confirmation-texte {
+    font-size: 0.95em;
+    font-weight: bold;
+    color: #3e2723;
+    margin-bottom: 10px;
+    line-height: 1.35;
+  }
+  .bloc-confirmation button {
+    width: 100%;
+    padding: 16px 10px;
+    font-size: 1.1em;
+    font-weight: bold;
+    color: white;
+    background: #e65100;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
 </style>
 </head>
 <body>
 
 <h1>Telecommande phyphox</h1>
+
+<div class="bloc-confirmation" id="bloc-confirmation" style="display:none;">
+  <div class="confirmation-texte" id="confirmation-texte"></div>
+  <button id="confirmation-bouton" onclick="confirmerExportSuivant()">Fichier suivant</button>
+</div>
 
 <div class="bloc-global">
   <button class="bouton-global demarrer" onclick="toutFaire('start')">DEMARRER TOUT</button>
@@ -174,7 +217,7 @@
 <div class="aide">
   Saisissez une seule fois le nom et l'adresse de chaque esclave (adresse affichee dans phyphox, onglet "Remote access", par exemple 192.168.43.23:8080). Tout est memorise sur ce telephone/navigateur.
   <br><br>
-  Pour un vol : DEMARRER TOUT au decollage (demarre les esclaves ; le GPS du master se lance a la main, directement dans phyphox). A l'atterrissage, ARRETER TOUT arrete ET exporte automatiquement les donnees de chaque esclave (telechargees sur le master, au format CSV) — pour ne jamais oublier l'export. Les fichiers arrivent dans le dossier Telechargements du master ; il faudra les recuperer depuis le master a la fin de la journee (cable, Drive...), mais plus besoin d'aller sur les esclaves.
+  Pour un vol : DEMARRER TOUT au decollage (demarre les esclaves ; le GPS du master se lance a la main, directement dans phyphox). A l'atterrissage, ARRETER TOUT arrete chaque esclave puis enchaine sur l'export : un bloc orange apparait en haut de la page, avec un bouton a appuyer pour chaque fichier ("Fichier suivant"). C'est volontaire : Chrome bloque parfois un telechargement qui n'est pas declenche par un appui direct, donc chaque fichier attend maintenant un vrai appui plutot que de s'enchainer tout seul en silence (et de risquer d'en perdre un). Les fichiers arrivent dans le dossier Telechargements du master ; il faudra les recuperer depuis le master a la fin de la journee (cable, Drive...), mais plus besoin d'aller sur les esclaves.
   <br><br>
   Entre deux vols, sans toucher les esclaves : une fois l'export automatique termine (voir le journal), appuyez sur "Effacer tout" pour vider la memoire de chaque esclave et repartir propre avant le vol suivant. Le bouton "Exporter tout" reste disponible separement si vous voulez re-exporter a un autre moment.
 </div>
@@ -289,8 +332,11 @@ function exporterUn(index) {
 // l'ouverture de plusieurs fenetres depuis un seul clic (bloqueur de pop-up).
 // "etapes" est un tableau de { url, delai } — le delai est celui a attendre
 // APRES avoir charge cette URL avant de passer a la suivante (ou de fermer
-// l'onglet si c'est la derniere).
-function ouvrirSequence(etapes, libelle) {
+// l'onglet si c'est la derniere). N'utiliser QUE pour des commandes
+// (start/stop/clear) qui ne declenchent aucun telechargement : voir plus bas
+// pourquoi les exports ne peuvent pas s'enchainer de la meme facon.
+// onTermine (optionnel) est appele une fois l'onglet referme.
+function ouvrirSequence(etapes, libelle, onTermine) {
   if (etapes.length === 0) {
     journaliser("Aucune adresse configuree.");
     return;
@@ -307,8 +353,9 @@ function ouvrirSequence(etapes, libelle) {
     if (i >= etapes.length) {
       setTimeout(() => {
         try { fenetre.close(); } catch (e) {}
+        journaliser("=== " + libelle + " termine ===");
+        if (onTermine) onTermine();
       }, etapes[etapes.length - 1].delai);
-      journaliser("=== " + libelle + " termine ===");
       return;
     }
     setTimeout(() => {
@@ -325,28 +372,105 @@ function ouvrirSequence(etapes, libelle) {
   suivante();
 }
 
-function toutFaire(cmd) {
-  const estArret = cmd === "stop";
-  journaliser("=== " + (estArret ? "ARRET" : "DEMARRAGE") + " GLOBAL " + (estArret ? "+ EXPORT " : "") + "===");
+// ---------------------------------------------------------------- exports
+// Un export declenche un telechargement de fichier. Chrome Android bloque
+// (ou demande une autorisation qui disparait vite) tout telechargement qui
+// n'est pas directement declenche par un appui de l'utilisateur : dans
+// l'ancienne version, seul le tout premier fichier de la sequence suivait un
+// vrai clic — tous les suivants partaient d'un setTimeout, donc consideres
+// par Chrome comme "automatiques" et parfois bloques silencieusement.
+// Solution : on ne telecharge plus qu'un seul fichier par appui reel. Le
+// premier export part du clic sur le bouton ; les suivants attendent que
+// l'operateur appuie explicitement sur "Fichier suivant" (bloc orange en
+// haut de page), ce qui constitue a chaque fois un nouveau geste utilisateur
+// valide pour Chrome.
+let exportGuide = null; // { fenetre, actifs, declenches, libelle }
 
-  const actifs = appareils.filter((a) => a.adresse);
-  let etapes = actifs.map((a) => ({ url: construireUrl(a.adresse, cmd), delai: 900 }));
+function demarrerExportsGuides(actifs, libelle) {
+  if (actifs.length === 0) {
+    journaliser("Aucune adresse configuree pour l'export.");
+    return;
+  }
+  const fenetre = window.open(construireUrlExport(actifs[0].adresse), "_blank");
+  if (!fenetre) {
+    journaliser("Pop-up bloque par le navigateur. Autorisez les pop-up pour cette page, puis reessayez.");
+    return;
+  }
+  journaliser((actifs[0].nom || "Appareil") + " : export (1/" + actifs.length + ") declenche.");
 
-  // Au clic sur ARRETER TOUT, on enchaine directement sur l'export de
-  // chaque appareil, pour ne jamais oublier de recuperer les donnees.
-  if (estArret) {
-    etapes = etapes.concat(actifs.map((a) => ({ url: construireUrlExport(a.adresse), delai: 2500 })));
+  if (actifs.length === 1) {
+    setTimeout(() => { try { fenetre.close(); } catch (e) {} }, 3000);
+    journaliser("=== " + libelle + " termine ===");
+    return;
   }
 
-  ouvrirSequence(etapes, estArret ? "Arret + export" : "Demarrage");
+  exportGuide = { fenetre, actifs, declenches: 1, libelle };
+  afficherBoutonExportSuivant();
+}
+
+function afficherBoutonExportSuivant() {
+  const bloc = document.getElementById("bloc-confirmation");
+  const texte = document.getElementById("confirmation-texte");
+  const bouton = document.getElementById("confirmation-bouton");
+  const { actifs, declenches } = exportGuide;
+  if (declenches < actifs.length) {
+    texte.textContent = "Fichier " + declenches + "/" + actifs.length + " recupere. Chrome peut demander une autorisation avant le suivant : appuyez ci-dessous des que le fichier precedent est arrive dans Telechargements.";
+    bouton.textContent = "Fichier suivant (" + (declenches + 1) + "/" + actifs.length + ")";
+  } else {
+    texte.textContent = "Dernier fichier (" + actifs.length + "/" + actifs.length + ") declenche. Appuyez pour terminer.";
+    bouton.textContent = "Terminer";
+  }
+  bloc.style.display = "block";
+}
+
+function confirmerExportSuivant() {
+  if (!exportGuide) return;
+  const { fenetre, actifs, declenches, libelle } = exportGuide;
+
+  if (declenches >= actifs.length) {
+    try { fenetre.close(); } catch (e) {}
+    document.getElementById("bloc-confirmation").style.display = "none";
+    journaliser("=== " + libelle + " termine ===");
+    exportGuide = null;
+    return;
+  }
+
+  const a = actifs[declenches];
+  try {
+    fenetre.location.href = construireUrlExport(a.adresse);
+    journaliser((a.nom || "Appareil") + " : export (" + (declenches + 1) + "/" + actifs.length + ") declenche.");
+  } catch (e) {
+    journaliser("Erreur : " + e.message);
+  }
+  exportGuide.declenches++;
+  afficherBoutonExportSuivant();
+}
+
+function toutFaire(cmd) {
+  const estArret = cmd === "stop";
+  const actifs = appareils.filter((a) => a.adresse);
+
+  if (!estArret) {
+    journaliser("=== DEMARRAGE GLOBAL ===");
+    ouvrirSequence(actifs.map((a) => ({ url: construireUrl(a.adresse, cmd), delai: 900 })), "Demarrage");
+    return;
+  }
+
+  // Au clic sur ARRETER TOUT : arret automatique de chaque appareil (pas de
+  // telechargement, donc pas de restriction Chrome), puis enchainement sur
+  // l'export guide (un appui par fichier) pour ne jamais oublier de
+  // recuperer les donnees.
+  journaliser("=== ARRET GLOBAL (export guide ensuite, un appui par fichier) ===");
+  ouvrirSequence(
+    actifs.map((a) => ({ url: construireUrl(a.adresse, "stop"), delai: 900 })),
+    "Arret",
+    () => demarrerExportsGuides(actifs, "Export apres arret")
+  );
 }
 
 function exporterTout() {
-  journaliser("=== EXPORT GLOBAL ===");
-  // Un export telecharge un fichier, ca prend un peu plus de temps qu'une
-  // simple commande start/stop : on laisse plus de marge entre deux etapes.
-  const etapes = appareils.filter((a) => a.adresse).map((a) => ({ url: construireUrlExport(a.adresse), delai: 2500 }));
-  ouvrirSequence(etapes, "Export");
+  journaliser("=== EXPORT GLOBAL (un appui par fichier) ===");
+  demarrerExportsGuides(appareils.filter((a) => a.adresse), "Export");
 }
 
 function effacerTout() {
@@ -392,6 +516,19 @@ function dessiner() {
 
 dessiner();
 journaliser("Page prete. " + appareils.length + " appareil(s) configure(s).");
+
+// ------------------------------------------------------------- hors ligne
+// Enregistre le service worker qui permet de rouvrir cette page sans
+// reseau (voir sw.js). Echoue silencieusement (avec trace dans le journal)
+// sur un navigateur qui ne le supporte pas : la page reste utilisable,
+// simplement sans le mode hors ligne.
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js")
+      .then(() => journaliser("Mode hors ligne active (page installee localement)."))
+      .catch((e) => journaliser("Mode hors ligne indisponible : " + e.message));
+  });
+}
 </script>
 
 </body>
