@@ -170,6 +170,19 @@ function tracerCourbe(canvas, series, opts) {
   }
   ctx.restore();
 
+  // ligne verticale optionnelle (temps courant de lecture, onglet Vol) :
+  // dessinee apres les courbes, avec le meme clip sur le cadre de tracé.
+  if (opts.ligneVerticaleX !== undefined && opts.ligneVerticaleX !== null &&
+      opts.ligneVerticaleX >= xMin && opts.ligneVerticaleX <= xMax) {
+    ctx.save();
+    ctx.beginPath(); ctx.rect(M.l, M.t, w-M.l-M.r, h-M.t-M.b); ctx.clip();
+    const xv = px(opts.ligneVerticaleX);
+    ctx.strokeStyle = "#c94b6a"; ctx.lineWidth = 1.5; ctx.setLineDash([4,3]);
+    ctx.beginPath(); ctx.moveTo(xv, M.t); ctx.lineTo(xv, h-M.b); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+  }
+
   // legende
   if (legende) {
     let lx = M.l;

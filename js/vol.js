@@ -31,6 +31,34 @@ let volMapInstance = null, volTrajectoireLayer = null, volCurseurMarker = null;
 let volEcouteursGlobauxInstalles = false;
 let volRedessinPlanifie = false;
 
+// Horloge de lecture animee (Tache A) : etat unique, avance par
+// requestAnimationFrame (temps reel ecoule x vitesse). Tous les elements
+// visuels (troncature des 3 courbes, ligne verticale, marqueur carte) sont
+// de simples fonctions de volLecturePosition, pas des horloges separees.
+// volLecturePosition === null : mode normal (pas de lecture entamee), les 3
+// courbes s'affichent completes comme aujourd'hui, aucune ligne verticale ;
+// des qu'elle est non-nulle (lecture demarree ou glissiere utilisee au moins
+// une fois), l'onglet passe en "mode lecture" (cf. volModeLectureActif()).
+let volLecturePosition = null;   // minutes, dans le domaine du vol
+let volLectureEnCours = false;
+let volLectureVitesse = 60;      // x1, x10, x60, x300 (defaut x60 : vol de plusieurs dizaines de minutes)
+let volLectureFrameId = null;
+let volLectureDernierTs = null;
+let volControlesLecture = null;  // { btnPlay, slider, labelTemps } (references DOM)
+
+// Couleur de la trace GPS (Tache B) : bascule altitude / niveau sonore
+// moyen, altitude par defaut pour ne rien changer a l'usage existant.
+let volCouleurTrace = "altitude";     // "altitude" | "son"
+let volInclureVoiesFaibles = false;   // reintegrer dans la moyenne les voies signalees "niveau anormalement faible"
+let volControleCouleurTrace = null;   // { sel, optSon }
+let volLegendeCouleurTrace = null;    // { min, titre, max }
+// Cache de calculerAvertissementsNiveaux(niveauxRapidesParVoie()) (app.js) :
+// ce calcul relit l'integralite du signal brut de chaque voie (leq(), cout
+// O(n)) ; recalcule une seule fois par (re)rendu de l'onglet (rendreOngletVol)
+// plutot qu'a chaque frame de lecture ou chaque survol souris, qui appellent
+// redessinerVol() jusqu'a 60 fois par seconde (cf. volVoiesValides()).
+let volAvertissementsNiveauxCache = null;
+
 /* ------------------------------------------------------------- horodatage */
 // Le fichier .TXT ecrit par le firmware Teensy contient "Date et heure :
 // AAAA-MM-JJ HH:MM:SS" quand l'horloge RTC etait synchronisee (ou la
@@ -79,6 +107,7 @@ function volDomaineComplet() {
 /* ============================================================ construction UI */
 function rendreOngletVol(conteneur) {
   conteneur.innerHTML = "";
+  volAvertissementsNiveauxCache = calculerAvertissementsNiveaux(niveauxRapidesParVoie());
   conteneur.appendChild(creerTitreImpression("Vol"));
 
   const horodatage = extraireHorodatageTxt(txtTexte);
@@ -102,6 +131,8 @@ function rendreOngletVol(conteneur) {
   noteZoom.textContent = "Glissez sur un graphique pour zoomer sur une période, molette pour zoomer/dézoomer, tous les graphiques restent synchronisés.";
   barreOutils.appendChild(noteZoom);
   conteneur.appendChild(barreOutils);
+
+  conteneur.appendChild(creerBarreLectureVol());
 
   const layout = document.createElement("div");
   layout.className = "vol-layout";
@@ -139,9 +170,13 @@ function rendreOngletVol(conteneur) {
   const canvasSon = document.getElementById("c-vol-son");
   const canvasAccel = document.getElementById("c-vol-accel");
 
+  colDroite.appendChild(creerControleCouleurTraceVol());
+
   const mapDiv = document.createElement("div");
   mapDiv.id = "vol-map"; mapDiv.className = "vol-map no-print";
   colDroite.appendChild(mapDiv);
+
+  colDroite.appendChild(creerLegendeCouleurTraceVol());
 
   const btnKml = document.createElement("button");
   btnKml.type = "button"; btnKml.className = "secondaire no-print"; btnKml.style.marginTop = ".6rem";
@@ -292,6 +327,144 @@ function creerBlocDepotVol({ titre, onFichier, decalageValeur, decalageSet }) {
   return bloc;
 }
 
+/* ==================================================== lecture animee (Tache A) */
+// "Mode lecture" actif <=> une position de lecture a ete choisie (demarrage
+// ou glissiere) ET on n'est pas en train de generer la vue d'impression —
+// l'export PDF/PNG (preparerVueImpression, app.js) doit toujours produire les
+// courbes completes, quel que soit l'etat de la lecture au moment du clic
+// (Tache A.5). preparerVueImpression() ajoute la classe "impression" au body
+// de facon synchrone pendant tout le rendu, y compris le vidage de la file de
+// dessins en attente : verifier cette classe ici suffit, sans etat separe.
+function volModeLectureActif() {
+  return volLecturePosition !== null && !document.body.classList.contains("impression");
+}
+
+// Ne garde que les points dont le temps (meme unite que `limite`, ici des
+// minutes) est <= limite. xs suppose croissant (serie temporelle) : on peut
+// s'arreter des le premier point au-dela, pas besoin de tout parcourir.
+function volTronquerSeries(xs, ys, limite) {
+  const xsT = [], ysT = [];
+  for (let i = 0; i < xs.length; i++) {
+    if (xs[i] > limite) break;
+    xsT.push(xs[i]); ysT.push(ys[i]);
+  }
+  return { xs: xsT, ys: ysT };
+}
+
+function formatMinSecVol(minutes) {
+  if (!isFinite(minutes)) return "0:00";
+  const totalS = Math.max(0, Math.round(minutes*60));
+  const m = Math.floor(totalS/60), s = totalS%60;
+  return `${m}:${String(s).padStart(2,"0")}`;
+}
+
+// Zoom lie (point A.6) : si la lecture depasse la fenetre zoomee, fait
+// glisser cette fenetre pour garder le curseur visible, a largeur constante.
+// Choix simplifie (pas de suivi "en douceur" anime a part) : suffisant car
+// deja appele a chaque frame de lecture, donc le glissement suit la lecture
+// image par image des que le bord est atteint.
+function volSuivreFenetreZoom() {
+  if (volZoomMin === null || volZoomMax === null || volLecturePosition === null) return;
+  const largeur = volZoomMax - volZoomMin;
+  if (volLecturePosition > volZoomMax) {
+    volZoomMax = volLecturePosition;
+    volZoomMin = volZoomMax - largeur;
+  } else if (volLecturePosition < volZoomMin) {
+    volZoomMin = volLecturePosition;
+    volZoomMax = volZoomMin + largeur;
+  }
+}
+
+function volLectureTick(ts) {
+  if (!volLectureEnCours) { volLectureFrameId = null; return; }
+  if (volLectureDernierTs === null) volLectureDernierTs = ts;
+  const dtS = Math.max(0, (ts - volLectureDernierTs) / 1000);
+  volLectureDernierTs = ts;
+  const domaine = volDomaineComplet();
+  volLecturePosition = Math.min(domaine.max, (volLecturePosition ?? domaine.min) + (dtS*volLectureVitesse)/60);
+  volSurvolMinutes = volLecturePosition; // pilote le marqueur carte existant (mettreAJourCarteVol)
+  volSuivreFenetreZoom();
+  if (volLecturePosition >= domaine.max - 1e-9) volLectureEnCours = false; // fin de vol : pause automatique
+  redessinerVol();
+  volLectureFrameId = volLectureEnCours ? requestAnimationFrame(volLectureTick) : null;
+}
+
+function demarrerLectureVol() {
+  const domaine = volDomaineComplet();
+  if (volLecturePosition === null || volLecturePosition >= domaine.max - 1e-9) volLecturePosition = domaine.min;
+  volLectureEnCours = true;
+  volLectureDernierTs = null;
+  if (volLectureFrameId === null) volLectureFrameId = requestAnimationFrame(volLectureTick);
+}
+
+function arreterLectureVol() {
+  volLectureEnCours = false;
+  if (volLectureFrameId !== null) { cancelAnimationFrame(volLectureFrameId); volLectureFrameId = null; }
+}
+
+function creerBarreLectureVol() {
+  const bar = document.createElement("div");
+  bar.className = "vol-lecture no-print";
+
+  const btnPlay = document.createElement("button");
+  btnPlay.type = "button"; btnPlay.className = "secondaire";
+  btnPlay.addEventListener("click", () => {
+    if (volLectureEnCours) arreterLectureVol(); else demarrerLectureVol();
+    redessinerVol();
+  });
+  bar.appendChild(btnPlay);
+
+  const labelVitesse = document.createElement("label");
+  labelVitesse.className = "vol-lecture-vitesse";
+  labelVitesse.appendChild(document.createTextNode("Vitesse "));
+  const selVitesse = document.createElement("select");
+  for (const v of [1, 10, 60, 300]) {
+    const opt = document.createElement("option");
+    opt.value = String(v); opt.textContent = "x" + v;
+    if (v === volLectureVitesse) opt.selected = true;
+    selVitesse.appendChild(opt);
+  }
+  selVitesse.addEventListener("change", () => { volLectureVitesse = parseInt(selVitesse.value, 10); });
+  labelVitesse.appendChild(selVitesse);
+  bar.appendChild(labelVitesse);
+
+  const slider = document.createElement("input");
+  slider.type = "range"; slider.className = "vol-lecture-slider";
+  slider.min = "0"; slider.max = "1"; slider.step = "0.001"; slider.value = "0";
+  slider.addEventListener("input", () => {
+    arreterLectureVol();
+    volLecturePosition = parseFloat(slider.value);
+    volSurvolMinutes = volLecturePosition;
+    volSuivreFenetreZoom();
+    redessinerVol();
+  });
+  bar.appendChild(slider);
+
+  const labelTemps = document.createElement("span");
+  labelTemps.className = "vol-lecture-temps note";
+  bar.appendChild(labelTemps);
+
+  volControlesLecture = { btnPlay, slider, labelTemps };
+  mettreAJourControlesLectureVol();
+  return bar;
+}
+
+function mettreAJourControlesLectureVol() {
+  if (!volControlesLecture) return;
+  const { btnPlay, slider, labelTemps } = volControlesLecture;
+  const domaine = volDomaineComplet();
+  slider.min = String(domaine.min);
+  slider.max = String(domaine.max);
+  slider.step = String((domaine.max - domaine.min) / 1000 || 0.001);
+  // Ne pas ecraser la valeur pendant que l'utilisatrice la manipule au
+  // clavier/souris (le champ a le focus) : redessinerVol() est aussi appele
+  // depuis le gestionnaire "input" du meme slider.
+  if (document.activeElement !== slider) slider.value = String(volLecturePosition ?? domaine.min);
+  btnPlay.textContent = volLectureEnCours ? "⏸ Pause" : "▶ Lecture";
+  const pos = volLecturePosition ?? domaine.min;
+  labelTemps.textContent = `${formatMinSecVol(pos)} / ${formatMinSecVol(domaine.max)}`;
+}
+
 /* ============================================================== redessin */
 function planifierRedessinVol() {
   if (volRedessinPlanifie) return;
@@ -301,6 +474,8 @@ function planifierRedessinVol() {
 
 function redessinerVol() {
   if (!wavData || !volCanvases) return;
+  mettreAJourControlesLectureVol();
+  mettreAJourControleCouleurTraceVol();
   const domaine = volDomaineComplet();
   const xMin = volZoomMin ?? domaine.min;
   const xMax = volZoomMax ?? domaine.max;
@@ -309,29 +484,36 @@ function redessinerVol() {
   dessinerSonVol(volCanvases.son, xMin, xMax);
   dessinerAccelVol(volCanvases.accel, xMin, xMax);
   mettreAJourCarteVol();
+  mettreAJourLegendeCouleurTraceVol();
 }
 
 function dessinerSonVol(canvas, xMin, xMax) {
   const voies = voiesAnalysees();
+  const tronquer = volModeLectureActif() ? volLecturePosition : null;
   const series = [];
   for (const v of voies) {
     const r = resultatsBase[v];
-    series.push({ xs: r.temporel.temps.map(t => t/60), ys: r.temporel.niveaux, couleur: PALETTE_VOIES[v], label: nomVoie(v) });
+    let xs = r.temporel.temps.map(t => t/60), ys = r.temporel.niveaux;
+    if (tronquer !== null) ({ xs, ys } = volTronquerSeries(xs, ys, tronquer));
+    series.push({ xs, ys, couleur: PALETTE_VOIES[v], label: nomVoie(v) });
   }
   tracerCourbe(canvas, series, {
     titre: `Niveau sonore, LAeq court terme (1 s), ${voies.length} voie${voies.length>1?"s":""}`,
     xlabel: "temps (min)", ylabel: `niveau (${uniteCourante()})`,
-    xMin, xMax,
+    xMin, xMax, ligneVerticaleX: tronquer,
   });
 }
 
 function dessinerAccelVol(canvas, xMin, xMax) {
+  const tronquer = volModeLectureActif() ? volLecturePosition : null;
   const series = [];
   for (let i = 0; i < volAccel.length; i++) {
     if (!volAccel[i]) continue;
     const decalage = volDecalages.accel[i] || 0;
+    let xs = volAccel[i].temps.map(t => (t+decalage)/60), ys = volAccel[i].magnitude;
+    if (tronquer !== null) ({ xs, ys } = volTronquerSeries(xs, ys, tronquer));
     series.push({
-      xs: volAccel[i].temps.map(t => (t+decalage)/60), ys: volAccel[i].magnitude,
+      xs, ys,
       couleur: PALETTE_VOIES[i % PALETTE_VOIES.length], label: `Téléphone esclave ${i+1}`,
     });
   }
@@ -348,7 +530,7 @@ function dessinerAccelVol(canvas, xMin, xMax) {
   tracerCourbe(canvas, series, {
     titre,
     xlabel: "temps (min)", ylabel: "accélération (m/s²)",
-    xMin, xMax,
+    xMin, xMax, ligneVerticaleX: tronquer,
   });
 }
 
@@ -371,6 +553,7 @@ function dessinerAltitudeVol(canvas, xMin, xMax) {
 
   const xs = volGps.temps.map(t => (t+volDecalages.gps)/60);
   const ys = volGps.alt;
+  const tronquer = volModeLectureActif() ? volLecturePosition : null;
 
   let aMin = Infinity, aMax = -Infinity;
   for (let i = 0; i < xs.length; i++) {
@@ -415,11 +598,20 @@ function dessinerAltitudeVol(canvas, xMin, xMax) {
   ctx.strokeStyle = "#20242b"; ctx.lineWidth = 1.8; ctx.beginPath();
   let started = false;
   for (let i = 0; i < xs.length; i++) {
+    if (tronquer !== null && xs[i] > tronquer) break; // xs croissant : rien au-dela a tracer
     if (xs[i] < xMin || xs[i] > xMax || ys[i] === null || !isFinite(ys[i])) { started = false; continue; }
     const x = px(xs[i]), y = py(ys[i]);
     if (!started) { ctx.moveTo(x,y); started = true; } else ctx.lineTo(x,y);
   }
   ctx.stroke();
+
+  // ligne verticale au temps courant de lecture (Tache A.3), meme clip.
+  if (tronquer !== null && tronquer >= xMin && tronquer <= xMax) {
+    const xv = px(tronquer);
+    ctx.strokeStyle = "#c94b6a"; ctx.lineWidth = 1.5; ctx.setLineDash([4,3]);
+    ctx.beginPath(); ctx.moveTo(xv, M.t); ctx.lineTo(xv, h-M.b); ctx.stroke();
+    ctx.setLineDash([]);
+  }
   ctx.restore();
 
   ctx.textAlign = "left"; ctx.textBaseline = "alphabetic"; ctx.font = "12px sans-serif"; ctx.fillStyle = "#5b6270";
@@ -508,6 +700,146 @@ function attacherInteractionZoom(canvas) {
   }, { passive: false });
 }
 
+/* ============================================== couleur de la trace (Tache B) */
+// Voies retenues pour le calcul du niveau sonore moyen de la trace GPS :
+// reutilise voiesAnalysees() (js/app.js, session precedente — une voie
+// decochee n'a de toute facon aucune entree dans resultatsBase, donc ne peut
+// pas etre incluse par erreur), en excluant par defaut celles signalees
+// "niveau anormalement faible" par calculerAvertissementsNiveaux() (meme
+// fichier, meme session) : un micro probablement debranche ne doit pas tirer
+// la moyenne vers le bas. volInclureVoiesFaibles permet de les reintegrer
+// explicitement (case a cocher, cf. creerControleCouleurTraceVol).
+function volVoiesValides() {
+  const avert = volAvertissementsNiveauxCache || [];
+  return voiesAnalysees().filter(v => volInclureVoiesFaibles || !avert[v]);
+}
+
+// Interpolation lineaire simple entre les deux points de la courbe de niveau
+// les plus proches de `t` (secondes, meme referentiel que `temps`) ; hors de
+// la plage couverte par `temps`, renvoie la valeur la plus proche disponible
+// (pas d'extrapolation), comme demande (Tache B.2).
+function niveauInterpoleVol(temps, niveaux, t) {
+  const n = temps.length;
+  if (!n) return null;
+  if (t <= temps[0]) return niveaux[0];
+  if (t >= temps[n-1]) return niveaux[n-1];
+  let i = 0;
+  while (i < n-1 && temps[i+1] < t) i++;
+  const t0 = temps[i], t1 = temps[i+1], y0 = niveaux[i], y1 = niveaux[i+1];
+  const f = (t-t0) / ((t1-t0) || 1);
+  return y0 + f*(y1-y0);
+}
+
+// Niveau sonore moyen (voies valides uniquement) a l'instant de chaque point
+// GPS, apres recalage temporel (volDecalages.gps) : null si aucune voie
+// valide ou pas de trace GPS chargee.
+function calculerNiveauxMoyensGps() {
+  if (!volGps || !volGps.lat.length) return null;
+  const voies = volVoiesValides();
+  if (!voies.length) return null;
+  const n = volGps.lat.length;
+  const niveaux = new Array(n);
+  for (let i = 0; i < n; i++) {
+    const tWav = volGps.temps[i] + volDecalages.gps;
+    let somme = 0;
+    for (const v of voies) somme += niveauInterpoleVol(resultatsBase[v].temporel.temps, resultatsBase[v].temporel.niveaux, tWav);
+    niveaux[i] = somme / voies.length;
+  }
+  return niveaux;
+}
+
+// Valeurs (altitude ou niveau sonore moyen) et normalisation associees, selon
+// le mode courant (volCouleurTrace) : partagees par la carte, la legende et
+// l'export KML (Tache B.5), pour qu'ils restent toujours coherents entre eux.
+function volValeursCouleurTrace() {
+  if (!volGps || !volGps.lat.length) return null;
+  let valeurs;
+  if (volCouleurTrace === "son") {
+    valeurs = calculerNiveauxMoyensGps();
+    if (!valeurs) return null;
+  } else {
+    valeurs = volGps.alt;
+  }
+  let vMin = Infinity, vMax = -Infinity;
+  for (const v of valeurs) if (v !== null && isFinite(v)) { if (v<vMin) vMin=v; if (v>vMax) vMax=v; }
+  const ok = isFinite(vMin) && isFinite(vMax) && vMax > vMin;
+  return { valeurs, vMin, vMax, ok };
+}
+
+function creerControleCouleurTraceVol() {
+  const wrap = document.createElement("div");
+  wrap.className = "vol-couleur-trace no-print";
+
+  const label = document.createElement("label");
+  label.appendChild(document.createTextNode("Couleur de la trace : "));
+  const sel = document.createElement("select");
+  const optAlt = document.createElement("option"); optAlt.value = "altitude"; optAlt.textContent = "Altitude";
+  const optSon = document.createElement("option"); optSon.value = "son"; optSon.textContent = "Niveau sonore";
+  sel.appendChild(optAlt); sel.appendChild(optSon);
+  sel.value = volCouleurTrace;
+  sel.addEventListener("change", () => { volCouleurTrace = sel.value; redessinerVol(); });
+  label.appendChild(sel);
+  wrap.appendChild(label);
+
+  const labelInclure = document.createElement("label");
+  labelInclure.className = "vol-inclure-faibles";
+  const cbInclure = document.createElement("input");
+  cbInclure.type = "checkbox"; cbInclure.checked = volInclureVoiesFaibles;
+  cbInclure.addEventListener("change", () => { volInclureVoiesFaibles = cbInclure.checked; redessinerVol(); });
+  labelInclure.appendChild(cbInclure);
+  labelInclure.appendChild(document.createTextNode(" inclure les voies signalées faibles"));
+  labelInclure.title = "Une voie cochée mais signalée \"niveau anormalement faible\" (page d'accueil) est exclue par défaut de la moyenne du niveau sonore : un micro probablement débranché ne doit pas tirer la moyenne vers le bas.";
+  wrap.appendChild(labelInclure);
+
+  volControleCouleurTrace = { sel, optSon };
+  mettreAJourControleCouleurTraceVol();
+  return wrap;
+}
+
+// Desactive l'option "Niveau sonore" (avec explication) quand aucune voie
+// valide n'est retenue (Tache B.4), et rebascule sur "Altitude" si le mode
+// "son" etait actif et devient indisponible.
+function mettreAJourControleCouleurTraceVol() {
+  if (!volControleCouleurTrace) return;
+  const { sel, optSon } = volControleCouleurTrace;
+  const dispo = volVoiesValides().length > 0;
+  optSon.disabled = !dispo;
+  optSon.title = dispo ? "" : "Aucune voie valide retenue pour calculer un niveau sonore moyen (toutes décochées, ou toutes signalées comme anormalement faibles).";
+  if (!dispo && volCouleurTrace === "son") { volCouleurTrace = "altitude"; sel.value = "altitude"; }
+}
+
+function creerLegendeCouleurTraceVol() {
+  const wrap = document.createElement("div");
+  wrap.className = "vol-legende no-print";
+  const barre = document.createElement("div");
+  barre.className = "vol-legende-barre";
+  const grad = VIRIDIS_STOPS.map(s => `${viridisCss(s[0])} ${(s[0]*100).toFixed(1)}%`).join(", ");
+  barre.style.background = `linear-gradient(to right, ${grad})`;
+  wrap.appendChild(barre);
+  const labels = document.createElement("div");
+  labels.className = "vol-legende-labels";
+  const min = document.createElement("span"), titre = document.createElement("span"), max = document.createElement("span");
+  labels.appendChild(min); labels.appendChild(titre); labels.appendChild(max);
+  wrap.appendChild(labels);
+  volLegendeCouleurTrace = { min, titre, max };
+  mettreAJourLegendeCouleurTraceVol();
+  return wrap;
+}
+
+function mettreAJourLegendeCouleurTraceVol() {
+  if (!volLegendeCouleurTrace) return;
+  const { min, titre, max } = volLegendeCouleurTrace;
+  titre.textContent = volCouleurTrace === "son" ? `Niveau sonore moyen (${uniteCourante()})` : "Altitude (m)";
+  const couleurs = volValeursCouleurTrace();
+  const chiffres = volCouleurTrace === "son" ? 1 : 0;
+  if (couleurs && couleurs.ok) {
+    min.textContent = couleurs.vMin.toFixed(chiffres);
+    max.textContent = couleurs.vMax.toFixed(chiffres);
+  } else {
+    min.textContent = "—"; max.textContent = "—";
+  }
+}
+
 /* ===================================================================== carte */
 function initialiserCarteVol(mapDiv) {
   if (volMapInstance) { volMapInstance.remove(); volMapInstance = null; }
@@ -528,14 +860,11 @@ function mettreAJourCarteVol() {
   volTrajectoireLayer.clearLayers();
   if (!volGps || !volGps.lat.length) return;
 
-  const pts = volGps.lat.map((lat,i) => ({ lat, lon: volGps.lon[i], alt: volGps.alt[i], t: (volGps.temps[i]+volDecalages.gps)/60 }));
-
-  let aMin = Infinity, aMax = -Infinity;
-  for (const p of pts) if (p.alt !== null && isFinite(p.alt)) { if (p.alt<aMin) aMin=p.alt; if (p.alt>aMax) aMax=p.alt; }
-  const altOk = isFinite(aMin) && isFinite(aMax) && aMax > aMin;
+  const pts = volGps.lat.map((lat,i) => ({ lat, lon: volGps.lon[i], t: (volGps.temps[i]+volDecalages.gps)/60 }));
+  const couleurs = volValeursCouleurTrace();
 
   for (let i = 0; i < pts.length-1; i++) {
-    const t = altOk ? (((pts[i].alt+pts[i+1].alt)/2)-aMin)/(aMax-aMin) : 0.5;
+    const t = couleurs && couleurs.ok ? (((couleurs.valeurs[i]+couleurs.valeurs[i+1])/2)-couleurs.vMin)/(couleurs.vMax-couleurs.vMin) : 0.5;
     L.polyline([[pts[i].lat,pts[i].lon],[pts[i+1].lat,pts[i+1].lon]], { color: viridisCss(t), weight: 4, opacity: .9 }).addTo(volTrajectoireLayer);
   }
 
@@ -570,20 +899,27 @@ function exporterKmlVol() {
   if (!volGps || !volGps.lat.length) { alert("Aucune trajectoire GPS chargée à exporter."); return; }
   const pts = volGps.lat.map((lat,i) => ({ lat, lon: volGps.lon[i], alt: volGps.alt[i] }));
 
+  // altitudeMode du KML (rendu 3D dans Google Earth) : independant du mode de
+  // coloration choisi ci-dessous, se base uniquement sur la disponibilite
+  // reelle de l'altitude GPS.
   let aMin = Infinity, aMax = -Infinity;
   for (const p of pts) if (p.alt !== null && isFinite(p.alt)) { if (p.alt<aMin) aMin=p.alt; if (p.alt>aMax) aMax=p.alt; }
-  const altOk = isFinite(aMin) && isFinite(aMax) && aMax > aMin;
+  const altitudeModeOk = isFinite(aMin) && isFinite(aMax) && aMax > aMin;
+
+  // Couleur de la trace exportee : suit le mode actuellement affiche a
+  // l'ecran (altitude ou niveau sonore), pas toujours l'altitude (Tache B.5).
+  const couleurs = volValeursCouleurTrace();
 
   let placemarks = "";
   for (let i = 0; i < pts.length-1; i++) {
-    const t = altOk ? (((pts[i].alt+pts[i+1].alt)/2)-aMin)/(aMax-aMin) : 0.5;
+    const t = couleurs && couleurs.ok ? (((couleurs.valeurs[i]+couleurs.valeurs[i+1])/2)-couleurs.vMin)/(couleurs.vMax-couleurs.vMin) : 0.5;
     const [r,g,b] = viridisRGB(t);
-    const alt1 = altOk ? pts[i].alt : 0, alt2 = altOk ? pts[i+1].alt : 0;
+    const alt1 = altitudeModeOk ? pts[i].alt : 0, alt2 = altitudeModeOk ? pts[i+1].alt : 0;
     placemarks += `
     <Placemark>
       <Style><LineStyle><color>${couleurKmlDepuisRgb(r,g,b)}</color><width>4</width></LineStyle></Style>
       <LineString>
-        <altitudeMode>${altOk ? "absolute" : "clampToGround"}</altitudeMode>
+        <altitudeMode>${altitudeModeOk ? "absolute" : "clampToGround"}</altitudeMode>
         <coordinates>${pts[i].lon},${pts[i].lat},${alt1} ${pts[i+1].lon},${pts[i+1].lat},${alt2}</coordinates>
       </LineString>
     </Placemark>`;

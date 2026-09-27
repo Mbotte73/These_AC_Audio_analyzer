@@ -128,6 +128,24 @@ canvas.chart.spectrogramme{ height:380px; }
 .lexique dd{ margin:0 0 .4rem; }
 
 /* -------------------------------------------------------------------- vol */
+.vol-lecture{
+  display:flex; flex-wrap:wrap; align-items:center; gap:1rem;
+  background:var(--brand-soft); border-radius:8px; padding:.7rem 1rem; margin-bottom:1rem;
+}
+.vol-lecture-vitesse{ display:flex; align-items:center; gap:.4rem; font-size:.85rem; color:var(--ink-soft); font-weight:600; }
+.vol-lecture-vitesse select{ font-size:.9rem; padding:.3rem .5rem; border-radius:6px; border:1px solid var(--line); background:#fff; }
+.vol-lecture-slider{ flex:1 1 200px; min-width:160px; }
+.vol-lecture-temps{ font-variant-numeric:tabular-nums; min-width:100px; text-align:right; }
+
+.vol-couleur-trace{ display:flex; flex-wrap:wrap; align-items:center; gap:1rem; margin-bottom:.6rem; font-size:.86rem; }
+.vol-couleur-trace select{ font-size:.88rem; padding:.3rem .5rem; border-radius:6px; border:1px solid var(--line); background:#fff; margin-left:.3rem; }
+.vol-inclure-faibles{ display:flex; align-items:center; gap:.4rem; color:var(--ink-soft); cursor:help; }
+
+.vol-legende{ margin-top:.6rem; }
+.vol-legende-barre{ height:12px; border-radius:6px; border:1px solid var(--line); }
+.vol-legende-labels{ display:flex; justify-content:space-between; font-size:.78rem; color:var(--ink-soft); margin-top:.3rem; }
+.vol-legende-labels span:nth-child(2){ font-weight:600; }
+
 .vol-depots{ display:flex; flex-wrap:wrap; gap:1rem; margin:1rem 0; align-items:flex-start; }
 .vol-depots > button{ align-self:center; }
 .vol-depot{ background:var(--brand-soft); border-radius:8px; padding:.8rem 1rem; flex:1 1 260px; min-width:230px; }
