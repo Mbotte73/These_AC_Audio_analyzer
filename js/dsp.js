@@ -75,6 +75,45 @@ function lfilter(b, a, x) {
   return y;
 }
 
+/* Calcule lfilter uniquement sur la plage [debut, fin) de la sortie deja
+   allouee `y`, en reprenant l'historique du filtre a partir des echantillons
+   deja ecrits avant `debut` (x et y doivent contenir intacts les
+   echantillons precedents : la recursion ne regarde que n-k >= 0). Permet de
+   decouper un filtrage long (mesure de session : ~33 s a elles trois, sur
+   les 4 voies, pour un fichier de 25 min — le poste de calcul le plus couteux
+   de l'analyse, plus que le spectre ou le spectrogramme) en tranches
+   entrecoupees de pauses, avec un resultat strictement identique a un appel
+   unique de lfilter sur tout le signal. lfilter elle-meme reste inchangee
+   (utilisee telle quelle ailleurs, y compris dans les tests). */
+function lfilterTranche(b, a, x, y, debut, fin) {
+  const nb = b.length, na = a.length;
+  for (let n = debut; n < fin; n++) {
+    let acc = 0;
+    for (let k = 0; k < nb; k++) if (n - k >= 0) acc += b[k] * x[n - k];
+    for (let k = 1; k < na; k++) if (n - k >= 0) acc -= a[k] * y[n - k];
+    y[n] = acc / a[0];
+  }
+}
+
+/* Variante chunkee (asynchrone) de lfilter, pour laisser la main au
+   navigateur pendant un filtrage long. onProgres(fraction) est appelee apres
+   chaque tranche ; ceder() doit renvoyer une promesse qui laisse le
+   navigateur repeindre avant de continuer. Pour un signal plus court qu'une
+   tranche (tous les fichiers de test existants, quelques secondes), la
+   boucle ne fait qu'un seul tour : aucune pause ajoutee, aussi rapide
+   qu'avant. */
+const TAILLE_TRANCHE_LFILTER = 500000; // echantillons (~11 ms de calcul a 44100 Hz par tranche)
+async function lfilterAsync(b, a, x, onProgres, ceder) {
+  const y = new Float64Array(x.length);
+  for (let debut = 0; debut < x.length; debut += TAILLE_TRANCHE_LFILTER) {
+    const fin = Math.min(debut + TAILLE_TRANCHE_LFILTER, x.length);
+    lfilterTranche(b, a, x, y, debut, fin);
+    if (onProgres) onProgres(fin / x.length);
+    if (fin < x.length && ceder) await ceder();
+  }
+  return y;
+}
+
 /* ================================================================== FFT */
 function fft(re, im) {
   const n = re.length;
@@ -128,109 +167,184 @@ function parametresFftParDefaut(fs, longueurSignal) {
   };
 }
 
-/* Periodogramme de Welch, fenetre/recouvrement/type parametrables.
-   Remplace l'ancienne fonction welch() a parametres fixes (Hann, 50%,
-   nperseg=min(pow2Below(fs),pow2Below(len))) : avec les parametres par
-   defaut ci-dessus, le resultat est strictement identique. */
-function calculerPsd(signal, fs, params) {
-  const nperseg = Math.min(params.nperseg, pow2Below(signal.length));
-  const recouvrement = Math.min(Math.max(params.recouvrement, 0), 90);
-  const step = Math.max(1, Math.round(nperseg * (1 - recouvrement/100)));
-  const { w: fen, winPower } = genererFenetre(params.fenetre, nperseg);
-
-  const nBins = nperseg / 2 + 1;
-  const psdSum = new Float64Array(nBins);
-  const scale = 1.0 / (fs * winPower);
-  let nSeg = 0;
-  // Buffers FFT reutilises d'un segment a l'autre plutot que realloues : sur
-  // un fichier de plusieurs minutes, ceci evite des milliers d'allocations
-  // de tableaux de la taille de la fenetre (source majeure de lenteur/GC).
-  const re = new Float64Array(nperseg), im = new Float64Array(nperseg);
-
-  for (let start = 0; start + nperseg <= signal.length; start += step) {
-    for (let i = 0; i < nperseg; i++) re[i] = signal[start+i] * fen[i];
-    im.fill(0);
-    fft(re, im);
-    for (let k = 0; k < nBins; k++) {
-      let p = (re[k]*re[k] + im[k]*im[k]) * scale;
-      if (k > 0 && k < nBins - 1) p *= 2;   // energie des frequences negatives repliee
-      psdSum[k] += p;
-    }
-    nSeg++;
-  }
-  if (nSeg === 0) nSeg = 1;
-  // Stocke le resultat en simple precision : les niveaux en dB n'ont pas
-  // besoin de la precision de Float64, et un fichier long avec de
-  // nombreuses combinaisons de parametres FFT explorees (mises en cache
-  // par voie dans app.js) reste ainsi sous une empreinte memoire raisonnable.
-  const psd = new Float32Array(nBins);
-  for (let k = 0; k < nBins; k++) psd[k] = psdSum[k] / nSeg;
-  const freqs = new Float64Array(nBins);
-  for (let k = 0; k < nBins; k++) freqs[k] = k * fs / nperseg;
-  return { freqs, psd, df: fs / nperseg, nperseg };
-}
-
 /* STFT glissante pour le spectrogramme : meme formule par trame que
    calculerPsd (un segment de Welch, sans moyenne sur l'axe temps), afin que
    le niveau colore du spectrogramme soit coherent avec le spectre en
    bande fine trace a cote. */
 const STFT_MAX_TRAMES = 3000;
 
-function calculerStft(signal, fs, params) {
-  const nperseg = Math.min(params.nperseg, pow2Below(signal.length));
+/* Choisit nperseg et le pas (hop) entre segments consecutifs. Une petite
+   fenetre combinee a un fort recouvrement sur un enregistrement long (25 min,
+   4 voies) produirait des dizaines de milliers de segments, chacun coutant
+   une FFT complete : sur un fichier de mesure de terrain, c'est le poste de
+   calcul dominant (mesure de session : calculerPsd + calculerStft comptaient
+   a elles deux pour pres de la moitie du temps total d'analyse sur 25 min/4
+   voies). Au-dela de STFT_MAX_TRAMES segments, le pas est directement
+   agrandi pour VISER ce nombre de segments CALCULES (pas seulement
+   affiches) : moins de FFT a calculer pour un resultat affiche equivalent,
+   plutot que de calculer tous les segments dans le pas dense puis de les
+   regrouper par moyenne apres coup (ancien comportement, qui ne reduisait
+   que la memoire/l'affichage, pas le calcul). Le pas reste toujours borne a
+   nperseg : deux fenetres consecutives restent au moins jointives, aucune
+   portion du signal ne se retrouve hors de toute fenetre d'analyse (un
+   evenement bref ne peut pas disparaitre entre deux segments). */
+function parametresSegmentationFft(longueurSignal, params) {
+  const nperseg = Math.min(params.nperseg, pow2Below(longueurSignal));
   const recouvrement = Math.min(Math.max(params.recouvrement, 0), 90);
-  const step = Math.max(1, Math.round(nperseg * (1 - recouvrement/100)));
+  const stepSouhaite = Math.max(1, Math.round(nperseg * (1 - recouvrement/100)));
+  const nSegSouhaite = Math.max(0, Math.floor((longueurSignal - nperseg) / stepSouhaite) + 1);
+  let step = stepSouhaite;
+  if (nSegSouhaite > STFT_MAX_TRAMES) {
+    step = Math.min(nperseg, Math.ceil(stepSouhaite * nSegSouhaite / STFT_MAX_TRAMES));
+  }
+  return { nperseg, step };
+}
+
+/* ---------------------------------------------------------------------
+   Calcul partage entre calculerPsd et calculerStft : les deux utilisent
+   exactement la meme boucle par segment (fenetrage + FFT + module carre),
+   sur le meme signal et les memes parametres — seule differe la maniere
+   dont le resultat par segment est ensuite consomme (moyenne pour l'un,
+   trame par trame pour l'autre). Les calculer separement (comme avant) fait
+   tourner cette boucle deux fois pour rien. Le resultat de la boucle est mis
+   en cache par signal (WeakMap, nettoye automatiquement quand le signal
+   n'est plus reference, par exemple lors d'une nouvelle analyse) et par jeu
+   de parametres FFT : appeler calculerPsd PUIS calculerStft sur le meme
+   signal ne fait tourner la FFT qu'une seule fois, sans que la signature ni
+   le comportement externe de calculerPsd/calculerStft ne changent (utilisees
+   telles quelles ailleurs, y compris directement dans les tests).
+   ========================================================================= */
+const _cacheSegmentsFft = new WeakMap(); // signal (Float32Array) -> Map(cle -> resultat)
+function _cleSegmentsFft(fs, params) { return `${fs}|${params.nperseg}|${params.recouvrement}|${params.fenetre}`; }
+
+function _obtenirCacheSegments(signal) {
+  let m = _cacheSegmentsFft.get(signal);
+  if (!m) { m = new Map(); _cacheSegmentsFft.set(signal, m); }
+  return m;
+}
+
+function _preparerSegmentation(signal, fs, params) {
+  const { nperseg, step } = parametresSegmentationFft(signal.length, params);
   const { w: fen, winPower } = genererFenetre(params.fenetre, nperseg);
   const nBins = nperseg / 2 + 1;
   const scale = 1.0 / (fs * winPower);
-
   const freqs = new Float64Array(nBins);
   for (let k = 0; k < nBins; k++) freqs[k] = k * fs / nperseg;
+  const nSegments = Math.max(0, Math.floor((signal.length - nperseg) / step) + 1);
+  return { nperseg, step, fen, nBins, scale, freqs, nSegments };
+}
 
-  const nSegmentsNaif = Math.max(0, Math.floor((signal.length - nperseg) / step) + 1);
-  // Une petite fenetre combinee a un fort recouvrement sur un enregistrement
-  // long produirait des millions de trames (plusieurs Go en memoire) : au-
-  // dela d'une limite raisonnable, on regroupe par MOYENNE des segments
-  // consecutifs en une colonne affichee, plutot que d'elargir le pas entre
-  // segments (ce qui sauterait des portions entieres du signal : un
-  // evenement bref pourrait alors disparaitre du spectrogramme). La
-  // resolution frequentielle (nperseg) et le calcul des niveaux globaux et
-  // du spectre en bande fine (calculerPsd, independant) ne sont jamais
-  // alteres : seule la resolution temporelle AFFICHEE est reduite.
-  const groupe = nSegmentsNaif > STFT_MAX_TRAMES ? Math.ceil(nSegmentsNaif / STFT_MAX_TRAMES) : 1;
-
-  const re = new Float64Array(nperseg), im = new Float64Array(nperseg);
-  const temps = [];
-  const trames = [];
-  let colCourante = null, tempsSomme = 0, nDansGroupe = 0;
-
-  for (let start = 0; start + nperseg <= signal.length; start += step) {
-    for (let i = 0; i < nperseg; i++) re[i] = signal[start+i] * fen[i];
+/* Traite les segments d'indice [iDebut, iFin) : accumule dans psdSum (pour
+   calculerPsd) et pousse une trame par segment dans trames/temps (pour
+   calculerStft). Un seul passage alimente les deux a la fois. */
+function _traiterSegmentsFft(signal, fs, prep, iDebut, iFin, psdSum, trames, temps, re, im) {
+  const { nperseg, step, fen, nBins, scale } = prep;
+  for (let i = iDebut; i < iFin; i++) {
+    const start = i * step;
+    for (let k = 0; k < nperseg; k++) re[k] = signal[start+k] * fen[k];
     im.fill(0);
     fft(re, im);
-    if (colCourante === null) { colCourante = new Float64Array(nBins); tempsSomme = 0; nDansGroupe = 0; }
+    const col = new Float32Array(nBins);
     for (let k = 0; k < nBins; k++) {
       let p = (re[k]*re[k] + im[k]*im[k]) * scale;
-      if (k > 0 && k < nBins - 1) p *= 2;
-      colCourante[k] += p;
+      if (k > 0 && k < nBins - 1) p *= 2;   // energie des frequences negatives repliee
+      col[k] = p;
+      psdSum[k] += p;
     }
-    tempsSomme += (start + nperseg/2) / fs;
-    nDansGroupe++;
-    if (nDansGroupe === groupe) {
-      const col = new Float32Array(nBins);
-      for (let k = 0; k < nBins; k++) col[k] = colCourante[k] / nDansGroupe;
-      trames.push(col);
-      temps.push(tempsSomme / nDansGroupe);
-      colCourante = null;
-    }
-  }
-  if (colCourante !== null && nDansGroupe > 0) {
-    const col = new Float32Array(nBins);
-    for (let k = 0; k < nBins; k++) col[k] = colCourante[k] / nDansGroupe;
     trames.push(col);
-    temps.push(tempsSomme / nDansGroupe);
+    temps.push((start + nperseg/2) / fs);
   }
-  return { freqs, temps, trames, nperseg, df: fs / nperseg, tramesGroupees: groupe > 1 ? groupe : 0 };
+}
+
+function _finaliserSegmentsFft(nBins, freqs, nperseg, fs, psdSum, trames, temps, nSegments) {
+  const nSeg = nSegments || 1;
+  // Stocke le PSD en simple precision : les niveaux en dB n'ont pas besoin
+  // de la precision de Float64, et un fichier long avec de nombreuses
+  // combinaisons de parametres FFT explorees (mises en cache par voie dans
+  // app.js) reste ainsi sous une empreinte memoire raisonnable.
+  const psd = new Float32Array(nBins);
+  for (let k = 0; k < nBins; k++) psd[k] = psdSum[k] / nSeg;
+
+  // Garde-fou : si l'arrondi du pas (parametresSegmentationFft) laissait
+  // malgre tout un peu plus de segments que STFT_MAX_TRAMES, on regroupe les
+  // derniers par moyenne (meme principe que l'ancien comportement, mais ne
+  // se declenche plus qu'en cas d'arrondi, pas comme mecanisme principal).
+  let tramesFinales = trames, tempsFinal = temps, tramesGroupees = 0;
+  if (trames.length > STFT_MAX_TRAMES) {
+    const groupe = Math.ceil(trames.length / STFT_MAX_TRAMES);
+    tramesFinales = []; tempsFinal = [];
+    for (let i = 0; i < trames.length; i += groupe) {
+      const fin = Math.min(i + groupe, trames.length);
+      const col = new Float32Array(nBins);
+      let tSomme = 0;
+      for (let j = i; j < fin; j++) { for (let k = 0; k < nBins; k++) col[k] += trames[j][k]; tSomme += temps[j]; }
+      const n = fin - i;
+      for (let k = 0; k < nBins; k++) col[k] /= n;
+      tramesFinales.push(col); tempsFinal.push(tSomme / n);
+    }
+    tramesGroupees = groupe;
+  }
+
+  return { freqs, nperseg, df: fs / nperseg, psd, temps: tempsFinal, trames: tramesFinales, tramesGroupees };
+}
+
+function _calculerSegmentsFft(signal, fs, params) {
+  const cache = _obtenirCacheSegments(signal);
+  const cle = _cleSegmentsFft(fs, params);
+  if (cache.has(cle)) return cache.get(cle);
+
+  const prep = _preparerSegmentation(signal, fs, params);
+  const { nperseg, nBins, freqs, nSegments } = prep;
+  const psdSum = new Float64Array(nBins);
+  const trames = [], temps = [];
+  const re = new Float64Array(nperseg), im = new Float64Array(nperseg);
+  _traiterSegmentsFft(signal, fs, prep, 0, nSegments, psdSum, trames, temps, re, im);
+
+  const resultat = _finaliserSegmentsFft(nBins, freqs, nperseg, fs, psdSum, trames, temps, nSegments);
+  cache.set(cle, resultat);
+  return resultat;
+}
+
+/* Variante chunkee (asynchrone) de _calculerSegmentsFft, utilisee par
+   l'analyse interactive (app.js) pour laisser la main au navigateur entre
+   deux tranches de segments plutot que de bloquer d'un bloc — meme resultat,
+   mis dans le meme cache (un appel synchrone ulterieur via calculerPsd ou
+   calculerStft retrouve alors le resultat deja calcule, sans le recalculer). */
+const TRANCHE_SEGMENTS_FFT = 64; // nombre de segments calcules entre deux pauses
+async function calculerSegmentsFftAsync(signal, fs, params, onProgres, ceder) {
+  const cache = _obtenirCacheSegments(signal);
+  const cle = _cleSegmentsFft(fs, params);
+  if (cache.has(cle)) { if (onProgres) onProgres(1); return cache.get(cle); }
+
+  const prep = _preparerSegmentation(signal, fs, params);
+  const { nperseg, nBins, freqs, nSegments } = prep;
+  const psdSum = new Float64Array(nBins);
+  const trames = [], temps = [];
+  const re = new Float64Array(nperseg), im = new Float64Array(nperseg);
+
+  for (let i = 0; i < nSegments; i += TRANCHE_SEGMENTS_FFT) {
+    const fin = Math.min(i + TRANCHE_SEGMENTS_FFT, nSegments);
+    _traiterSegmentsFft(signal, fs, prep, i, fin, psdSum, trames, temps, re, im);
+    if (onProgres) onProgres(nSegments > 0 ? fin / nSegments : 1);
+    if (fin < nSegments && ceder) await ceder();
+  }
+
+  const resultat = _finaliserSegmentsFft(nBins, freqs, nperseg, fs, psdSum, trames, temps, nSegments);
+  cache.set(cle, resultat);
+  return resultat;
+}
+
+/* Periodogramme de Welch, fenetre/recouvrement/type parametrables. Delegue
+   au calcul partage ci-dessus (_calculerSegmentsFft) : signature et resultat
+   inchanges pour les appelants existants. */
+function calculerPsd(signal, fs, params) {
+  const r = _calculerSegmentsFft(signal, fs, params);
+  return { freqs: r.freqs, psd: r.psd, df: r.df, nperseg: r.nperseg };
+}
+
+function calculerStft(signal, fs, params) {
+  const r = _calculerSegmentsFft(signal, fs, params);
+  return { freqs: r.freqs, temps: r.temps, trames: r.trames, nperseg: r.nperseg, df: r.df, tramesGroupees: r.tramesGroupees };
 }
 
 /* ==================================================== reponse ponderee, dB, pour l'integration en bande */

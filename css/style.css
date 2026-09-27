@@ -132,7 +132,17 @@ canvas.chart.spectrogramme{ height:380px; }
   .vol-map{ min-height:340px; }
 }
 
+/* ------------------------------------------------------- barre de progression */
+.barre-progression-conteneur{ max-width:420px; margin:.9rem auto 0; }
+.barre-progression{ background:var(--line); border-radius:999px; height:9px; overflow:hidden; }
+.barre-progression-remplissage{ background:var(--brand); height:100%; width:0%; transition:width .15s linear; }
+
+/* ------------------------------------------------------------- presentation */
+.liste-fonctions{ margin:0; padding-left:1.2rem; color:var(--ink-soft); font-size:.92rem; }
+.liste-fonctions li{ margin-bottom:.35rem; }
+
 footer{ text-align:center; color:var(--ink-soft); font-size:.82rem; padding:1rem 0 2.5rem; }
+.pie-version{ margin-top:.3rem; font-size:.74rem; color:#9aa0a8; }
 
 @media print{
   .no-print{ display:none !important; }

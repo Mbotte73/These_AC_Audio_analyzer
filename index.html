@@ -39,13 +39,29 @@
   <div class="panel no-print" style="text-align:center;">
     <button class="principal" id="btnAnalyser" disabled>Analyser</button>
     <div class="note" id="statutAnalyse" style="margin-top:.6rem;"></div>
+    <div class="barre-progression-conteneur no-print" id="barreProgressionConteneur" style="display:none;">
+      <div class="barre-progression"><div class="barre-progression-remplissage" id="barreProgressionRemplissage"></div></div>
+    </div>
+  </div>
+
+  <div class="panel no-print" id="panelPresentation">
+    <h2>Ce que fait l'outil</h2>
+    <ul class="liste-fonctions">
+      <li>Analyse par micro : niveaux OASPL, LAeq, LCeq, LCpeak et LAFmax en dB(A) et dB(C), spectre en bande fine, tiers d'octave et spectrogramme.</li>
+      <li>Comparaison des 4 voies sur un meme graphique.</li>
+      <li>Etalonnage par voie (fichier de metadonnees .TXT) et correction de la fonction de transfert du microphone.</li>
+      <li>Onglet Vol : trajectoire GPS, accelerometres et niveau dB(A) synchronises sur une carte.</li>
+      <li>Export des graphiques en PNG, du tableau de synthese en CSV et impression PDF consolidee de tous les onglets.</li>
+    </ul>
   </div>
 
   <div id="zoneResultats"></div>
 
 </main>
 
-<footer>Outil autonome, aucune installation requise. Les calculs suivent la norme IEC 61672 pour les pondérations A et C.</footer>
+<footer>Outil autonome, aucune installation requise. Les calculs suivent la norme IEC 61672 pour les pondérations A et C.
+  <div id="pieDeVersion" class="pie-version"></div>
+</footer>
 
 <script src="js/dsp.js"></script>
 <script src="js/charts.js"></script>

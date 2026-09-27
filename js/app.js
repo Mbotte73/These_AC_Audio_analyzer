@@ -8,6 +8,12 @@
    exportes) montre 1 a 4. Voir nomVoie().
    ========================================================================= */
 
+// Numero de version affiche en pied de page (pas d'etape de build dans cet
+// outil : a incrementer ICI a la main a chaque evolution notable, avec la
+// date du jour). Seule constante a modifier pour changer l'indicateur.
+const VERSION_OUTIL = "v1.6 — 27 sept. 2026";
+document.getElementById("pieDeVersion").textContent = VERSION_OUTIL;
+
 function nomVoie(i) { return `Voie ${i+1}`; }
 
 // Badge de statut de calibration (point 5), visible directement sur
@@ -107,62 +113,148 @@ document.getElementById("btnAnalyser").addEventListener("click", async ()=>{
   calibration = lireCalibration(txtTexte);
   const bouton = document.getElementById("btnAnalyser");
   bouton.disabled = true;
-  await demarrerAnalyse();
-  bouton.disabled = false;
+  // try/finally : si demarrerAnalyse echoue (fichier tres volumineux,
+  // memoire insuffisante...), le bouton doit rester utilisable pour
+  // reessayer plutot que de bloquer l'interface (point 3, garde-fou).
+  try { await demarrerAnalyse(); } finally { bouton.disabled = false; }
 });
 
 function attendreProchaineImage() { return new Promise(r => requestAnimationFrame(r)); }
 
+// Pause reelle (macrotache), utilisee pendant les calculs decoupes en
+// tranches (lfilterAsync, calculerSegmentsFftAsync) : contrairement a
+// requestAnimationFrame (qui attend le prochain repaint), setTimeout(...,0)
+// laisse aussi le navigateur traiter les evenements en attente (clic sur un
+// autre onglet, redimensionnement...) entre deux tranches de calcul.
+function cederAuNavigateur() { return new Promise(r => setTimeout(r, 0)); }
+
+/* -------------------------------------------------------------- barre de progression */
+function afficherBarreProgression() {
+  document.getElementById("barreProgressionConteneur").style.display = "";
+}
+function masquerBarreProgression() {
+  document.getElementById("barreProgressionConteneur").style.display = "none";
+}
+function mettreAJourProgression(fraction, libelle) {
+  if (libelle !== undefined) document.getElementById("statutAnalyse").textContent = libelle;
+  const pct = Math.round(Math.min(1, Math.max(0, fraction)) * 100);
+  document.getElementById("barreProgressionRemplissage").style.width = pct + "%";
+}
+
+/* ------------------------------------------------------- calcul paresseux du spectre */
+// Calcule (en tranches, cf. calculerSegmentsFftAsync dans dsp.js) le spectre
+// et le spectrogramme d'une voie, et alimente cachePsd/cacheStft exactement
+// comme le ferait un appel synchrone a obtenirPsd/obtenirStft (memes cles,
+// meme forme de resultat) : un appel synchrone ulterieur a l'une ou l'autre
+// retrouve alors le resultat deja calcule, sans le recalculer.
+async function precalculerSpectral(v, onProgres) {
+  const cle = v + "|" + cleFft();
+  if (cachePsd.has(cle) && cacheStft.has(cle)) { if (onProgres) onProgres(1); return; }
+  const r = await calculerSegmentsFftAsync(resultatsBase[v].pression, wavData.fs, fftParams, onProgres, cederAuNavigateur);
+  const psdCorrige = new Float64Array(r.psd.length);
+  for (let k = 0; k < r.psd.length; k++) psdCorrige[k] = r.psd[k] * Math.pow(10, -correctionMicroDb(r.freqs[k])/10);
+  const bandesA = tiersOctave(r.freqs, psdCorrige, r.df, "A", resultatsBase[v].pref);
+  mettreEnCache(cachePsd, cle, { freqs: r.freqs, psdBrut: r.psd, psdCorrige, df: r.df, bandesA });
+  mettreEnCache(cacheStft, cle, { freqs: r.freqs, temps: r.temps, trames: r.trames, nperseg: r.nperseg, df: r.df, tramesGroupees: r.tramesGroupees });
+}
+
 /* ==================================================================== analyse */
-// Fonction asynchrone, avec un point d'attente entre chaque voie (via
-// requestAnimationFrame) : sur un fichier de plusieurs minutes, le filtrage
-// a lui seul prend plusieurs secondes par voie, et ce decoupage laisse le
-// navigateur peindre l'etat "Analyse en cours" entre deux voies plutot que
-// de geler l'onglet pendant toute la duree du traitement.
+// Au-dela de ce delai, l'analyse est anormalement longue pour l'usage prevu
+// (jusqu'a 25 min, 4 voies) : on previent l'utilisatrice plutot que de la
+// laisser croire que l'outil est plante, sans pour autant interrompre le
+// calcul (point 3, garde-fou).
+const DELAI_AVERTISSEMENT_LENTEUR_MS = 180_000; // 3 min
+
+// Fonction asynchrone, decoupee en tranches avec des pauses reelles
+// (cederAuNavigateur) a l'interieur meme du filtrage et du calcul spectral
+// (pas seulement entre deux voies) : sur un fichier de plusieurs minutes,
+// une seule des trois etapes de filtrage a elle seule peut prendre plusieurs
+// secondes, et le decoupage laisse le navigateur repeindre la barre de
+// progression regulierement pendant tout le calcul, pas seulement entre deux
+// blocs de plusieurs secondes chacun.
 async function demarrerAnalyse() {
   const statut = document.getElementById("statutAnalyse");
-  cachePsd.clear(); cacheStft.clear();
-  resultatsBase = [];
-  for (let v = 0; v < wavData.nCh; v++) {
-    statut.textContent = `Analyse en cours… voie ${v+1}/${wavData.nCh}`;
+  afficherBarreProgression();
+  mettreAJourProgression(0, "Preparation…");
+
+  let alerteLenteurAffichee = false;
+  const minuteur = setTimeout(() => {
+    alerteLenteurAffichee = true;
+    statut.textContent += " (cela prend plus longtemps que prevu — ne fermez pas cet onglet ; un fichier tres volumineux peut demander plusieurs minutes)";
+  }, DELAI_AVERTISSEMENT_LENTEUR_MS);
+
+  try {
+    cachePsd.clear(); cacheStft.clear();
+    resultatsBase = [];
+
+    const nVoies = wavData.nCh;
+    // Poids indicatifs de la barre de progression globale : le calcul des
+    // niveaux (filtrage passe-haut + ponderations A/C, sur les nVoies voies)
+    // est le poste le plus couteux mesure sur un fichier long ; le spectre et
+    // le spectrogramme ne sont precalcules ici que pour la premiere voie
+    // affichee (les 3 autres sont calcules a la demande, cf. activerOnglet).
+    const POIDS_NIVEAUX = 0.7, POIDS_SPECTRE_INITIAL = 0.3;
+
+    for (let v = 0; v < nVoies; v++) {
+      const spl = calibration[v];
+      const calibre = spl !== null && spl !== undefined;
+      const pref = calibre ? PREF : 1.0;
+      const gain = calibre ? PREF*Math.pow(10, spl/20) : 1.0;
+      const pression = wavData.canaux[v].map(x=>x*gain);
+
+      const libelle = `Calcul des niveaux — voie ${v+1}/${nVoies}…`;
+      function progresNiveaux(fraction) {
+        mettreAJourProgression(((v + fraction) / nVoies) * POIDS_NIVEAUX, libelle);
+      }
+
+      // Passe-haut 20 Hz applique en commun a tous les niveaux integres
+      // (OASPL, LAeq, LCeq, LCpeak, LAFmax), avant les ponderations A/C.
+      // Le spectre en bande fine, les tiers d'octave et le spectrogramme
+      // restent calcules sur `pression` (non filtree), stockee ci-dessous.
+      // Chacun des trois filtrages est calcule en tranches (lfilterAsync,
+      // dsp.js) : meme resultat qu'un appel unique a lfilter, mais entrecoupe
+      // de pauses reelles pour laisser respirer le navigateur.
+      const pressionHp = await lfilterAsync(B_HP20, A_HP20, pression, f => progresNiveaux(f/3), cederAuNavigateur);
+      const sigA = await lfilterAsync(B_A, A_A, pressionHp, f => progresNiveaux((1+f)/3), cederAuNavigateur);
+      const sigC = await lfilterAsync(B_C, A_C, pressionHp, f => progresNiveaux((2+f)/3), cederAuNavigateur);
+
+      resultatsBase.push({
+        voie: v, calibre, pref, pression,
+        leqA: leq(sigA, pref), leqC: leq(sigC, pref), leqZ: leq(pressionHp, pref),
+        lafmax: lmaxFast(sigA, wavData.fs, pref), lcpeak: lpeak(sigC, pref),
+        temporel: niveauTemporel(sigA, wavData.fs, pref, 1.0),
+      });
+    }
+
+    fftParams = parametresFftParDefaut(wavData.fs, resultatsBase[0].pression.length);
+    voieCourbeCapteur = null;
+    ongletActif = "voie0"; dernierVoieActive = 0;
+    comparaisonSelection = resultatsBase.map(()=>true);
+
+    // Spectre + spectrogramme de la premiere voie affichee seulement (calcul
+    // paresseux par onglet pour les 3 autres, cf. activerOnglet) : sur un
+    // fichier long, evite d'attendre les 4 voies avant de voir le premier
+    // resultat. Calcule ici en tranches (calculerSegmentsFftAsync, dsp.js) et
+    // range dans les memes caches que la version synchrone (obtenirPsd /
+    // obtenirStft) : construireInterface ci-dessous n'a donc plus qu'a lire
+    // un resultat deja pret.
+    await precalculerSpectral(0, f => mettreAJourProgression(POIDS_NIVEAUX + f*POIDS_SPECTRE_INITIAL,
+      `Spectre et spectrogramme — voie 1/${nVoies}…`));
+
+    mettreAJourProgression(1, "Generation des graphiques…");
     await attendreProchaineImage();
 
-    const spl = calibration[v];
-    const calibre = spl !== null && spl !== undefined;
-    const pref = calibre ? PREF : 1.0;
-    const gain = calibre ? PREF*Math.pow(10, spl/20) : 1.0;
-    const pression = wavData.canaux[v].map(x=>x*gain);
-
-    // Passe-haut 20 Hz applique en commun a tous les niveaux integres
-    // (OASPL, LAeq, LCeq, LCpeak, LAFmax), avant les ponderations A/C.
-    // Le spectre en bande fine, les tiers d'octave et le spectrogramme
-    // restent calcules sur `pression` (non filtree), stockee ci-dessous.
-    const pressionHp = lfilter(B_HP20, A_HP20, pression);
-    const sigA = lfilter(B_A, A_A, pressionHp);
-    const sigC = lfilter(B_C, A_C, pressionHp);
-
-    resultatsBase.push({
-      voie: v, calibre, pref, pression,
-      leqA: leq(sigA, pref), leqC: leq(sigC, pref), leqZ: leq(pressionHp, pref),
-      lafmax: lmaxFast(sigA, wavData.fs, pref), lcpeak: lpeak(sigC, pref),
-      temporel: niveauTemporel(sigA, wavData.fs, pref, 1.0),
-    });
+    construireInterface();
+    statut.textContent = "";
+  } catch (err) {
+    console.error(err);
+    statut.textContent = "Erreur pendant l'analyse : " + (err && err.message ? err.message : String(err)) +
+      ". Si le fichier est tres volumineux, fermer d'autres onglets pour liberer de la memoire peut aider ; sinon rechargez la page et reessayez.";
+    throw err;
+  } finally {
+    clearTimeout(minuteur);
+    masquerBarreProgression();
   }
-
-  // La construction de l'onglet initial (spectre + spectrogramme de la
-  // voie 1) reste un bloc synchrone couteux sur un fichier long : on laisse
-  // le message d'etat visible le temps qu'il s'affiche, plutot que de
-  // l'effacer juste avant que l'interface ne gele quelques secondes.
-  statut.textContent = "Préparation de l'affichage…";
-  await attendreProchaineImage();
-
-  fftParams = parametresFftParDefaut(wavData.fs, resultatsBase[0].pression.length);
-  voieCourbeCapteur = null;
-  ongletActif = "voie0"; dernierVoieActive = 0;
-  comparaisonSelection = resultatsBase.map(()=>true);
-
-  construireInterface();
-  statut.textContent = "";
 }
 
 function uniteCourante() {
@@ -257,14 +349,42 @@ function construireInterface() {
   activerOnglet(ongletActif);
 }
 
-function activerOnglet(id) {
+// Asynchrone : ouvrir l'onglet d'une voie dont le spectre/spectrogramme n'a
+// encore jamais ete calcule pour les parametres FFT courants declenche son
+// calcul a la demande (precalculerSpectral, en tranches), avec la barre de
+// progression le temps du calcul — plutot que de geler l'interface sur un
+// fichier long. Si le spectre est deja en cache (voie deja visitee, memes
+// parametres FFT), le rendu reste synchrone et immediat comme avant.
+async function activerOnglet(id) {
   ongletActif = id;
   if (id.startsWith("voie")) dernierVoieActive = parseInt(id.slice(4), 10);
   document.querySelectorAll("#tabsNav button").forEach(b=>b.classList.toggle("actif", b.dataset.onglet===id));
   document.querySelectorAll(".onglet-contenu").forEach(d=>d.classList.toggle("actif", d.id===`contenu-${id}`));
 
   const conteneur = document.getElementById(`contenu-${id}`);
-  if (id.startsWith("voie")) rendreOngletVoie(parseInt(id.slice(4),10), conteneur);
+  if (id.startsWith("voie")) {
+    const v = parseInt(id.slice(4), 10);
+    const cle = v + "|" + cleFft();
+    if (!cachePsd.has(cle) || !cacheStft.has(cle)) {
+      conteneur.innerHTML = `<p class="note">Calcul du spectre et du spectrogramme de ${nomVoie(v)}…</p>`;
+      afficherBarreProgression();
+      const libelle = `Spectre et spectrogramme — ${nomVoie(v)}…`;
+      mettreAJourProgression(0, libelle);
+      try {
+        await precalculerSpectral(v, f => mettreAJourProgression(f, libelle));
+      } catch (err) {
+        console.error(err);
+        conteneur.innerHTML = `<div class="avertissement">Erreur pendant le calcul du spectre de ${nomVoie(v)} : ${err && err.message ? err.message : String(err)}</div>`;
+        masquerBarreProgression();
+        return;
+      }
+      masquerBarreProgression();
+      // L'utilisatrice a pu changer d'onglet pendant le calcul : ne pas
+      // ecraser l'onglet desormais affiche avec un rendu obsolete.
+      if (ongletActif !== id) return;
+    }
+    rendreOngletVoie(v, conteneur);
+  }
   else if (id === "comparaison") rendreOngletComparaison(conteneur);
   else if (id === "capteur") rendreOngletCapteur(conteneur);
   else if (id === "vol") rendreOngletVol(conteneur);
