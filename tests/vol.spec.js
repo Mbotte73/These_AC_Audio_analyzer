@@ -207,3 +207,105 @@ test.describe("onglet Vol — integration avec fichiers CSV synthetiques", () =>
     await expect(depotGps.locator(".avertissement")).toContainText("Erreur");
   });
 });
+
+// Nombre variable d'accelerometres (point C) : la structure fixe a deux
+// telephones (volAccel[0]/volAccel[1], cles volDecalages.accel0/accel1) a ete
+// remplacee par un tableau de longueur variable. Verifie les cas 0, 1, 2 et 3
+// accelerometres (2 zones de depot par defaut, "+ Ajouter" jusqu'a 4).
+test.describe("onglet Vol — nombre variable d'accéléromètres (0 à 3+)", () => {
+  async function chargerMesureSimple(page, dir, nCh = 4) {
+    const wavPath = path.join(dir, "mesure.wav");
+    const { fs, canaux } = genererTonPur({ freqHz: 1000, niveauDbfsRms: -20, dureeS: 1, nCh });
+    ecrireWavFichier(wavPath, fs, canaux);
+
+    await page.goto("/index.html");
+    await page.locator("#inputFichiers").setInputFiles([wavPath]);
+    await expect(page.locator("#btnAnalyser")).toBeEnabled();
+    await page.locator("#btnAnalyser").click();
+    await page.locator("#tabsNav button").first().waitFor();
+    await page.locator('#tabsNav button[data-onglet="vol"]').click();
+  }
+
+  function accelCsv(decalageAmplitude) {
+    return [
+      "Time (s),Linear Acceleration x (m/s^2),Linear Acceleration y (m/s^2),Linear Acceleration z (m/s^2)",
+      `0,${decalageAmplitude},0,0`,
+      `1,0,${decalageAmplitude},0`,
+    ].join("\n");
+  }
+
+  test("0 accéléromètre : 2 zones de dépôt par défaut, aucun plantage, canvas non vide", async ({ page }) => {
+    const dir = await fsNode.promises.mkdtemp(path.join(os.tmpdir(), "aac-test-accel-"));
+    await chargerMesureSimple(page, dir);
+
+    // 1 zone GPS + 2 zones accelerometre par defaut = 3 zones de depot.
+    await expect(page.locator("#contenu-vol .vol-depot")).toHaveCount(3);
+    await expect(page.getByRole("button", { name: "+ Ajouter un accéléromètre" })).toBeVisible();
+
+    const etat = await page.evaluate(() => ({ charges: volAccel.filter(Boolean).length, zones: volNombreZonesAccel }));
+    expect(etat.charges).toBe(0);
+    expect(etat.zones).toBe(2);
+
+    const taille = await page.evaluate(() => {
+      const c = document.getElementById("c-vol-accel");
+      return { w: c.width, h: c.height };
+    });
+    expect(taille.w).toBeGreaterThan(0);
+    expect(taille.h).toBeGreaterThan(0);
+  });
+
+  test("1 accéléromètre : chargé dans la première zone", async ({ page }) => {
+    const dir = await fsNode.promises.mkdtemp(path.join(os.tmpdir(), "aac-test-accel-"));
+    await chargerMesureSimple(page, dir);
+
+    const accelPath = path.join(dir, "accel1.csv");
+    fsNode.writeFileSync(accelPath, accelCsv(3));
+    const depots = page.locator("#contenu-vol .vol-depot");
+    await depots.nth(1).locator('input[type="file"]').setInputFiles(accelPath); // 1ere zone accelerometre (apres le GPS)
+    await expect(depots.nth(1).locator(".avertissement")).toBeHidden();
+
+    const nCharges = await page.evaluate(() => volAccel.filter(Boolean).length);
+    expect(nCharges).toBe(1);
+  });
+
+  test("+ Ajouter un accéléromètre : une 3e zone apparaît, on peut y déposer un 3e téléphone", async ({ page }) => {
+    const dir = await fsNode.promises.mkdtemp(path.join(os.tmpdir(), "aac-test-accel-"));
+    await chargerMesureSimple(page, dir);
+
+    await page.getByRole("button", { name: "+ Ajouter un accéléromètre" }).click();
+    const zones = page.locator("#contenu-vol .vol-depot");
+    await expect(zones).toHaveCount(4); // GPS + 3 accelerometres
+
+    const accelPath1 = path.join(dir, "accel1.csv");
+    const accelPath3 = path.join(dir, "accel3.csv");
+    fsNode.writeFileSync(accelPath1, accelCsv(3));
+    fsNode.writeFileSync(accelPath3, accelCsv(5));
+
+    await zones.nth(1).locator('input[type="file"]').setInputFiles(accelPath1);
+    await expect(zones.nth(1).locator(".filename")).toContainText("accel1.csv");
+    await zones.nth(3).locator('input[type="file"]').setInputFiles(accelPath3);
+    await expect(zones.nth(3).locator(".filename")).toContainText("accel3.csv");
+
+    const etat = await page.evaluate(() => ({
+      charges: volAccel.filter(Boolean).length,
+      zones: volNombreZonesAccel,
+      slot0: volAccel[0] ? volAccel[0].magnitude.length : null,
+      slot2: volAccel[2] ? volAccel[2].magnitude.length : null,
+    }));
+    expect(etat.charges).toBe(2);
+    expect(etat.zones).toBe(3);
+    expect(etat.slot0).not.toBeNull();
+    expect(etat.slot2).not.toBeNull();
+  });
+
+  test("limite de 4 accéléromètres : le bouton \"+ Ajouter\" disparaît au maximum", async ({ page }) => {
+    const dir = await fsNode.promises.mkdtemp(path.join(os.tmpdir(), "aac-test-accel-"));
+    await chargerMesureSimple(page, dir);
+
+    await page.getByRole("button", { name: "+ Ajouter un accéléromètre" }).click(); // 2 -> 3
+    await expect(page.locator("#contenu-vol .vol-depot")).toHaveCount(4);
+    await page.getByRole("button", { name: "+ Ajouter un accéléromètre" }).click(); // 3 -> 4
+    await expect(page.locator("#contenu-vol .vol-depot")).toHaveCount(5);
+    await expect(page.getByRole("button", { name: "+ Ajouter un accéléromètre" })).toHaveCount(0);
+  });
+});

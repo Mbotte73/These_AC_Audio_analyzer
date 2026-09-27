@@ -34,7 +34,11 @@ function creerBadgeCalibration(calibre) {
 let wavData = null, txtTexte = null;
 let calibration = null;
 let resultatsBase = [];      // par voie : grandeurs independantes des parametres FFT
-let fftParams = null;        // { nperseg, recouvrement, fenetre }, partage entre les 4 voies
+                              // tableau creux : resultatsBase[v] n'existe que si la voie v a
+                              // ete cochee dans le panneau "Voies a analyser" (voir voiesSelectionnees
+                              // ci-dessous) ET effectivement analysee ; une voie decochee n'a
+                              // aucune entree ici, cf. voiesAnalysees().
+let fftParams = null;        // { nperseg, recouvrement, fenetre }, partage entre les voies analysees
 let cachePsd = new Map();
 let cacheStft = new Map();
 let ongletActif = "voie0";
@@ -42,10 +46,35 @@ let dernierVoieActive = 0;
 let comparaisonSelection = [true, true, true, true];
 let voieCourbeCapteur = null;
 
+// Voies cochees dans le panneau "Voies a analyser" (page d'accueil, avant de
+// cliquer sur "Analyser") : voiesSelectionnees[v] = true/false, une entree
+// par voie reellement presente dans le fichier (wavData.nCh), reinitialisee
+// a tout coche a chaque nouveau depot de WAV (construireSelectionVoies).
+let voiesSelectionnees = [];
+
 function baseNomFichier() { return wavData.nomFichier.replace(/\.wav$/i, ""); }
 
 /* baseName sans extension, pour comparer les noms de fichiers WAV et TXT */
 function baseNomSansExt(nom) { return nom.replace(/\.[^.]+$/, ""); }
+
+/* Liste des indices de voies effectivement analysees (resultatsBase[v]
+   existe) : a utiliser partout ou l'on parcourait auparavant 0..wavData.nCh-1
+   en supposant que toutes les voies avaient ete calculees (onglets,
+   impression, export CSV, selecteur de l'onglet capteur...), maintenant
+   qu'une voie decochee n'a pas d'entree dans resultatsBase. */
+function voiesAnalysees() {
+  const arr = [];
+  for (let v = 0; v < wavData.nCh; v++) if (resultatsBase[v]) arr.push(v);
+  return arr;
+}
+
+// Duree d'un fichier audio, format court pour la confirmation de depot
+// ("12 min 34 s" ou "45 s" si moins d'une minute).
+function formatDureeCourte(s) {
+  const total = Math.round(s);
+  const m = Math.floor(total / 60), sec = total % 60;
+  return m > 0 ? `${m} min ${sec} s` : `${sec} s`;
+}
 
 /* ---------------------------------------------------------- depot fichiers */
 function afficherAvertissementDepot(texte) {
@@ -65,24 +94,37 @@ async function traiterFichiers(liste) {
     avertissement = `Fichier(s) ignoré(s), extension non reconnue : ${inconnus.map(f=>f.name).join(", ")}.`;
   }
 
+  // Retour immediat au depot (avant meme la lecture, potentiellement longue
+  // sur un fichier volumineux) : reutilise le message de statut existant
+  // (statutAnalyse), pas de barre de progression ici — la lecture d'un WAV,
+  // meme volumineux, reste de l'ordre de la seconde (mesuree lors de la
+  // session precedente sur un fichier de 25 min), un simple message suffit.
+  const statut = document.getElementById("statutAnalyse");
+
   if (fichierWav) {
+    statut.textContent = `Lecture de ${fichierWav.name}…`;
     const buf = await fichierWav.arrayBuffer();
     try {
       wavData = lireWav(buf);
       wavData.nomFichier = fichierWav.name;
-      document.getElementById("btnAnalyser").disabled = false;
-      document.getElementById("nomWav").textContent = "Audio : " + fichierWav.name;
+      document.getElementById("nomWav").textContent =
+        `Audio : ${fichierWav.name} (${formatDureeCourte(wavData.dureeS)}, ${wavData.nCh} voie${wavData.nCh>1?"s":""}, ${wavData.fs} Hz)`;
+      construireSelectionVoies();
     } catch(err) {
       alert("Erreur de lecture du fichier WAV : " + err.message);
       wavData = null;
-      document.getElementById("btnAnalyser").disabled = true;
       document.getElementById("nomWav").textContent = "";
+      masquerSelectionVoies();
+    } finally {
+      statut.textContent = "";
     }
   }
 
   if (fichierTxt) {
+    statut.textContent = `Lecture de ${fichierTxt.name}…`;
     txtTexte = await fichierTxt.text();
     document.getElementById("nomTxt").textContent = "Métadonnées : " + fichierTxt.name;
+    statut.textContent = "";
   }
 
   if (fichierWav && fichierTxt && baseNomSansExt(fichierWav.name) !== baseNomSansExt(fichierTxt.name)) {
@@ -90,6 +132,116 @@ async function traiterFichiers(liste) {
       `Attention : les noms de fichiers ne correspondent pas (${fichierWav.name} / ${fichierTxt.name}). Le WAV est chargé quand même.`;
   }
   afficherAvertissementDepot(avertissement);
+}
+
+/* ------------------------------------------------------ selection des voies */
+// Ecart (en dB) en-dessous duquel une voie cochee est signalee comme
+// anormalement faible par rapport a la moyenne des autres voies cochees
+// (indice de micro debranche/mal connecte, cf. maquette) : jamais une
+// decoche automatique, seulement un signal visuel, la decision reste a
+// l'utilisatrice.
+const SEUIL_NIVEAU_FAIBLE_DB = 15;
+
+// Niveau global "rapide" d'une voie, sans filtrage ni etalonnage (juste le
+// RMS du signal brut, cf. leq() dans dsp.js) : sert uniquement a detecter
+// une voie anormalement faible avant l'analyse complete, a un cout
+// negligeable (un seul passage sur le signal, aucun filtrage IIR).
+function niveauxRapidesParVoie() {
+  return wavData.canaux.map(canal => leq(canal, 1.0));
+}
+
+// Pour chaque voie cochee, compare son niveau rapide a la moyenne des autres
+// voies cochees ; renvoie un tableau de booleens (indexe comme wavData.nCh).
+// Necessite au moins deux voies cochees pour qu'une comparaison ait un sens.
+function calculerAvertissementsNiveaux(niveaux) {
+  const avert = wavData.canaux.map(() => false);
+  const cochees = [];
+  for (let v = 0; v < wavData.nCh; v++) if (voiesSelectionnees[v]) cochees.push(v);
+  if (cochees.length < 2) return avert;
+  for (const v of cochees) {
+    const autres = cochees.filter(w => w !== v).map(w => niveaux[w]);
+    const moyenneAutres = autres.reduce((a,b)=>a+b, 0) / autres.length;
+    if (niveaux[v] < moyenneAutres - SEUIL_NIVEAU_FAIBLE_DB) avert[v] = true;
+  }
+  return avert;
+}
+
+function construireSelectionVoies() {
+  voiesSelectionnees = wavData.canaux.map(() => true);
+  document.getElementById("panelSelectionVoies").style.display = "";
+  rendreSelectionVoies();
+}
+
+function masquerSelectionVoies() {
+  const panel = document.getElementById("panelSelectionVoies");
+  panel.style.display = "none";
+  panel.innerHTML = "";
+  voiesSelectionnees = [];
+  mettreAJourBoutonAnalyser();
+}
+
+function mettreAJourBoutonAnalyser() {
+  const bouton = document.getElementById("btnAnalyser");
+  const n = voiesSelectionnees.filter(Boolean).length;
+  if (!wavData) { bouton.textContent = "Analyser"; bouton.disabled = true; return; }
+  bouton.textContent = n > 0 ? `Analyser (${n} voie${n>1?"s":""} sélectionnée${n>1?"s":""})` : "Analyser";
+  bouton.disabled = n === 0;
+}
+
+function rendreSelectionVoies() {
+  const panel = document.getElementById("panelSelectionVoies");
+  panel.innerHTML = "";
+
+  const titre = document.createElement("h2");
+  titre.textContent = "2. Voies à analyser";
+  panel.appendChild(titre);
+
+  const explication = document.createElement("p");
+  explication.style.cssText = "color:var(--ink-soft); font-size:.9rem; margin:0 0 1rem;";
+  explication.textContent = "Décochez une voie si vous savez qu'aucun micro n'y était branché sur cet enregistrement : elle ne sera pas calculée, ce qui accélère l'analyse.";
+  panel.appendChild(explication);
+
+  const niveaux = niveauxRapidesParVoie();
+  const avert = calculerAvertissementsNiveaux(niveaux);
+
+  const grille = document.createElement("div");
+  grille.className = "voies-selection";
+  for (let v = 0; v < wavData.nCh; v++) {
+    const carte = document.createElement("div");
+    carte.className = "voie-select-carte" + (avert[v] ? " avertissement-carte" : "");
+
+    const label = document.createElement("label");
+    const cb = document.createElement("input");
+    cb.type = "checkbox"; cb.checked = voiesSelectionnees[v];
+    cb.addEventListener("change", () => {
+      voiesSelectionnees[v] = cb.checked;
+      rendreSelectionVoies();
+    });
+    label.appendChild(cb);
+    label.appendChild(document.createTextNode(` ${nomVoie(v)} (micro ${v+1})`));
+    carte.appendChild(label);
+
+    if (avert[v]) {
+      const badge = document.createElement("div");
+      badge.className = "badge-niveau-faible";
+      badge.textContent = "⚠ signal anormalement faible";
+      carte.appendChild(badge);
+    }
+
+    grille.appendChild(carte);
+  }
+  panel.appendChild(grille);
+
+  const voiesFaibles = [];
+  for (let v = 0; v < wavData.nCh; v++) if (avert[v]) voiesFaibles.push(nomVoie(v));
+  if (voiesFaibles.length) {
+    const msg = document.createElement("div");
+    msg.className = "avertissement";
+    msg.textContent = `${voiesFaibles.join(", ")} ${voiesFaibles.length>1?"ont":"a"} un niveau nettement plus faible que les autres voies cochées sur cet enregistrement — micro débranché, mal connecté, ou panne possible. Vérifiez avant de l'inclure dans l'analyse.`;
+    panel.appendChild(msg);
+  }
+
+  mettreAJourBoutonAnalyser();
 }
 
 function configurerZoneDepot() {
@@ -109,7 +261,7 @@ function configurerZoneDepot() {
 configurerZoneDepot();
 
 document.getElementById("btnAnalyser").addEventListener("click", async ()=>{
-  if (!wavData) return;
+  if (!wavData || !voiesSelectionnees.some(Boolean)) return;
   calibration = lireCalibration(txtTexte);
   const bouton = document.getElementById("btnAnalyser");
   bouton.disabled = true;
@@ -187,24 +339,34 @@ async function demarrerAnalyse() {
     cachePsd.clear(); cacheStft.clear();
     resultatsBase = [];
 
-    const nVoies = wavData.nCh;
+    // Voies effectivement a calculer : celles cochees dans le panneau
+    // "Voies a analyser" (page d'accueil). Une voie decochee est purement et
+    // simplement ignoree ci-dessous (aucun filtrage, aucun niveau, aucune
+    // entree dans resultatsBase) : ce n'est pas seulement masque a
+    // l'affichage, le calcul est reellement saute.
+    const indicesSelectionnes = [];
+    for (let v = 0; v < wavData.nCh; v++) if (voiesSelectionnees[v]) indicesSelectionnes.push(v);
+    const nSel = indicesSelectionnes.length;
+
     // Poids indicatifs de la barre de progression globale : le calcul des
-    // niveaux (filtrage passe-haut + ponderations A/C, sur les nVoies voies)
-    // est le poste le plus couteux mesure sur un fichier long ; le spectre et
-    // le spectrogramme ne sont precalcules ici que pour la premiere voie
-    // affichee (les 3 autres sont calcules a la demande, cf. activerOnglet).
+    // niveaux (filtrage passe-haut + ponderations A/C, sur les nSel voies
+    // cochees) est le poste le plus couteux mesure sur un fichier long ; le
+    // spectre et le spectrogramme ne sont precalcules ici que pour la
+    // premiere voie cochee affichee (les autres sont calcules a la demande,
+    // cf. activerOnglet).
     const POIDS_NIVEAUX = 0.7, POIDS_SPECTRE_INITIAL = 0.3;
 
-    for (let v = 0; v < nVoies; v++) {
+    for (let i = 0; i < nSel; i++) {
+      const v = indicesSelectionnes[i];
       const spl = calibration[v];
       const calibre = spl !== null && spl !== undefined;
       const pref = calibre ? PREF : 1.0;
       const gain = calibre ? PREF*Math.pow(10, spl/20) : 1.0;
       const pression = wavData.canaux[v].map(x=>x*gain);
 
-      const libelle = `Calcul des niveaux — voie ${v+1}/${nVoies}…`;
+      const libelle = `Calcul des niveaux — ${nomVoie(v)} (${i+1}/${nSel})…`;
       function progresNiveaux(fraction) {
-        mettreAJourProgression(((v + fraction) / nVoies) * POIDS_NIVEAUX, libelle);
+        mettreAJourProgression(((i + fraction) / nSel) * POIDS_NIVEAUX, libelle);
       }
 
       // Passe-haut 20 Hz applique en commun a tous les niveaux integres
@@ -218,28 +380,30 @@ async function demarrerAnalyse() {
       const sigA = await lfilterAsync(B_A, A_A, pressionHp, f => progresNiveaux((1+f)/3), cederAuNavigateur);
       const sigC = await lfilterAsync(B_C, A_C, pressionHp, f => progresNiveaux((2+f)/3), cederAuNavigateur);
 
-      resultatsBase.push({
+      resultatsBase[v] = {
         voie: v, calibre, pref, pression,
         leqA: leq(sigA, pref), leqC: leq(sigC, pref), leqZ: leq(pressionHp, pref),
         lafmax: lmaxFast(sigA, wavData.fs, pref), lcpeak: lpeak(sigC, pref),
         temporel: niveauTemporel(sigA, wavData.fs, pref, 1.0),
-      });
+      };
     }
 
-    fftParams = parametresFftParDefaut(wavData.fs, resultatsBase[0].pression.length);
+    const premiereVoie = indicesSelectionnes[0];
+    fftParams = parametresFftParDefaut(wavData.fs, resultatsBase[premiereVoie].pression.length);
     voieCourbeCapteur = null;
-    ongletActif = "voie0"; dernierVoieActive = 0;
-    comparaisonSelection = resultatsBase.map(()=>true);
+    ongletActif = `voie${premiereVoie}`; dernierVoieActive = premiereVoie;
+    comparaisonSelection = [];
+    for (const v of indicesSelectionnes) comparaisonSelection[v] = true;
 
-    // Spectre + spectrogramme de la premiere voie affichee seulement (calcul
-    // paresseux par onglet pour les 3 autres, cf. activerOnglet) : sur un
-    // fichier long, evite d'attendre les 4 voies avant de voir le premier
-    // resultat. Calcule ici en tranches (calculerSegmentsFftAsync, dsp.js) et
-    // range dans les memes caches que la version synchrone (obtenirPsd /
-    // obtenirStft) : construireInterface ci-dessous n'a donc plus qu'a lire
-    // un resultat deja pret.
-    await precalculerSpectral(0, f => mettreAJourProgression(POIDS_NIVEAUX + f*POIDS_SPECTRE_INITIAL,
-      `Spectre et spectrogramme — voie 1/${nVoies}…`));
+    // Spectre + spectrogramme de la premiere voie cochee affichee seulement
+    // (calcul paresseux par onglet pour les autres, cf. activerOnglet) : sur
+    // un fichier long, evite d'attendre toutes les voies avant de voir le
+    // premier resultat. Calcule ici en tranches (calculerSegmentsFftAsync,
+    // dsp.js) et range dans les memes caches que la version synchrone
+    // (obtenirPsd / obtenirStft) : construireInterface ci-dessous n'a donc
+    // plus qu'a lire un resultat deja pret.
+    await precalculerSpectral(premiereVoie, f => mettreAJourProgression(POIDS_NIVEAUX + f*POIDS_SPECTRE_INITIAL,
+      `Spectre et spectrogramme — ${nomVoie(premiereVoie)} (1/${nSel})…`));
 
     mettreAJourProgression(1, "Generation des graphiques…");
     await attendreProchaineImage();
@@ -322,7 +486,7 @@ function construireInterface() {
   zone.appendChild(contenu);
 
   const onglets = [];
-  for (let v = 0; v < wavData.nCh; v++) onglets.push({ id: `voie${v}`, label: nomVoie(v) });
+  for (const v of voiesAnalysees()) onglets.push({ id: `voie${v}`, label: nomVoie(v) });
   onglets.push({ id: "comparaison", label: "Comparaison" });
   onglets.push({ id: "capteur", label: "Paramètres du capteur" });
   onglets.push({ id: "vol", label: "Vol" });
@@ -403,7 +567,7 @@ function rafraichirOngletActif() { activerOnglet(ongletActif); }
 function preparerVueImpression() {
   if (!wavData) return;
   document.body.classList.add("impression");
-  for (let v = 0; v < wavData.nCh; v++) rendreOngletVoie(v, document.getElementById(`contenu-voie${v}`));
+  for (const v of voiesAnalysees()) rendreOngletVoie(v, document.getElementById(`contenu-voie${v}`));
   rendreOngletComparaison(document.getElementById("contenu-comparaison"));
   rendreOngletCapteur(document.getElementById("contenu-capteur"));
   rendreOngletVol(document.getElementById("contenu-vol"));
@@ -448,7 +612,7 @@ function creerControlesFft(maxLen) {
 
   const note = document.createElement("div");
   note.className = "note";
-  note.textContent = `Résolution fréquentielle : ${(wavData.fs/Math.min(fftParams.nperseg, pow2Below(maxLen))).toFixed(2)} Hz/raie. S'applique au spectre en bande fine, aux tiers d'octave et au spectrogramme, pour les quatre voies.`;
+  note.textContent = `Résolution fréquentielle : ${(wavData.fs/Math.min(fftParams.nperseg, pow2Below(maxLen))).toFixed(2)} Hz/raie. S'applique au spectre en bande fine, aux tiers d'octave et au spectrogramme, pour toutes les voies analysées.`;
   div.appendChild(note);
 
   return div;
@@ -541,13 +705,15 @@ function creerBlocGraphique(idBase, titre, dessiner, nomFichierFn, classeSupp) {
 
 /* ---------------------------------------------------------- onglet comparaison */
 function rendreOngletComparaison(conteneur) {
+  const voies = voiesAnalysees();
+  const titreGraphique = `Comparaison des spectres en bande fine, ${voies.length} voie${voies.length>1?"s":""}`;
   conteneur.innerHTML = "";
   conteneur.appendChild(creerTitreImpression("Comparaison"));
-  conteneur.appendChild(creerControlesFft(resultatsBase[0].pression.length));
+  conteneur.appendChild(creerControlesFft(resultatsBase[voies[0]].pression.length));
 
   const cases = document.createElement("div");
   cases.className = "cases-voies";
-  for (let v = 0; v < wavData.nCh; v++) {
+  for (const v of voies) {
     const label = document.createElement("label");
     const cb = document.createElement("input");
     cb.type = "checkbox"; cb.checked = comparaisonSelection[v];
@@ -561,17 +727,17 @@ function rendreOngletComparaison(conteneur) {
 
   const unite = uniteCourante();
   const series = [];
-  for (let v = 0; v < wavData.nCh; v++) {
+  for (const v of voies) {
     if (!comparaisonSelection[v]) continue;
     const { freqs, psdCorrige } = obtenirPsd(v);
     series.push({ xs: Array.from(freqs), ys: psdEnDb(psdCorrige, resultatsBase[v].pref), couleur: PALETTE_VOIES[v], label: nomVoie(v) });
   }
 
   conteneur.appendChild(creerBlocGraphique("comparaison-spectre",
-    "Comparaison des spectres en bande fine, 4 voies",
+    titreGraphique,
     (canvas)=>{
       if (!series.length) { const {ctx,w,h} = preparerCanvas(canvas); ctx.clearRect(0,0,w,h); ctx.fillStyle="#5b6270"; ctx.font="13px sans-serif"; ctx.fillText("Sélectionnez au moins une voie ci-dessus.", 20, 30); return; }
-      tracerCourbe(canvas, series, { titre: "Comparaison des spectres en bande fine, 4 voies", xlabel: "fréquence (Hz)", ylabel: `niveau (${unite})`, logX: true, xMin: 20, xMax: wavData.fs/2, formatX: formatHz });
+      tracerCourbe(canvas, series, { titre: titreGraphique, xlabel: "fréquence (Hz)", ylabel: `niveau (${unite})`, logX: true, xMin: 20, xMax: wavData.fs/2, formatX: formatHz });
     },
     () => `${baseNomFichier()}_comparaison-spectre.png`));
 }
@@ -611,7 +777,7 @@ function rendreOngletCapteur(conteneur) {
   const label = document.createElement("label");
   label.textContent = "Voie affichée ci-dessous";
   const sel = document.createElement("select");
-  for (let v = 0; v < wavData.nCh; v++) {
+  for (const v of voiesAnalysees()) {
     const opt = document.createElement("option"); opt.value = v; opt.textContent = nomVoie(v);
     if (v === voieCourbeCapteur) opt.selected = true;
     sel.appendChild(opt);
@@ -672,7 +838,8 @@ function construirePanelSynthese() {
 function telechargerCsv() {
   const unite = uniteCourante();
   let csv = `voie,calibre,OASPL (${unite}),LAeq (${unite}),LCeq (${unite}),LAFmax (${unite}),LCpeak (${unite}),duree_s\n`;
-  for (const r of resultatsBase) {
+  for (const v of voiesAnalysees()) {
+    const r = resultatsBase[v];
     csv += `${nomVoie(r.voie)},${r.calibre?"oui":"non"},${r.leqZ.toFixed(2)},${r.leqA.toFixed(2)},${r.leqC.toFixed(2)},${r.lafmax.toFixed(2)},${r.lcpeak.toFixed(2)},${wavData.dureeS.toFixed(2)}\n`;
   }
   const blob = new Blob([csv], {type:"text/csv;charset=utf-8"});

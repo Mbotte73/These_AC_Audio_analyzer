@@ -112,12 +112,24 @@ canvas.chart.spectrogramme{ height:380px; }
 .cases-voies label{ display:flex; align-items:center; gap:.4rem; font-size:.92rem; font-weight:600; cursor:pointer; }
 .cases-voies .pastille{ width:12px; height:12px; border-radius:50%; display:inline-block; }
 
+/* ------------------------------------------------------- selection des voies */
+.voies-selection{ display:grid; grid-template-columns:repeat(auto-fit, minmax(150px,1fr)); gap:.75rem; margin-bottom:.9rem; }
+.voie-select-carte{ border:1px solid var(--line); border-radius:8px; padding:.7rem .85rem; background:#fafafa; }
+.voie-select-carte label{ display:flex; align-items:center; gap:.5rem; font-size:.9rem; font-weight:600; cursor:pointer; }
+.voie-select-carte input[type="checkbox"]{ width:16px; height:16px; }
+.voie-select-carte.avertissement-carte{ border-color:var(--warn-line); background:var(--warn-bg); }
+.badge-niveau-faible{
+  margin-top:.5rem; font-size:.72rem; font-weight:700; color:var(--warn-ink);
+  background:#f6d9c6; border-radius:4px; padding:.15rem .45rem; display:inline-block;
+}
+
 .lexique{ font-size:.86rem; color:var(--ink-soft); }
 .lexique dt{ font-weight:600; color:var(--ink); }
 .lexique dd{ margin:0 0 .4rem; }
 
 /* -------------------------------------------------------------------- vol */
-.vol-depots{ display:flex; flex-wrap:wrap; gap:1rem; margin:1rem 0; }
+.vol-depots{ display:flex; flex-wrap:wrap; gap:1rem; margin:1rem 0; align-items:flex-start; }
+.vol-depots > button{ align-self:center; }
 .vol-depot{ background:var(--brand-soft); border-radius:8px; padding:.8rem 1rem; flex:1 1 260px; min-width:230px; }
 .vol-depot-titre{ font-size:.86rem; font-weight:600; color:var(--brand); margin-bottom:.5rem; }
 .vol-decalage{ display:flex; align-items:center; gap:.4rem; font-size:.82rem; color:var(--ink-soft); margin-top:.5rem; }

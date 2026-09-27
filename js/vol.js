@@ -1,9 +1,10 @@
 "use strict";
 /* =========================================================================
    VOL.JS — onglet "Vol" : recalage temporel et visualisation conjointe du
-   WAV 4 voies (Teensy, deja analyse par app.js/dsp.js), d'un export GPS
-   phyphox et de deux exports accelerometre phyphox, sur une carte
-   satellite (Leaflet) et trois graphiques empiles a zoom lie.
+   WAV (Teensy, deja analyse par app.js/dsp.js), d'un export GPS phyphox et
+   d'un nombre variable d'exports accelerometre phyphox (0 a VOL_MAX_ACCEL
+   telephones esclaves, selon le vol), sur une carte satellite (Leaflet) et
+   trois graphiques empiles a zoom lie.
 
    Reutilise sans les recalculer : le parseur WAV (dsp.js), le niveau LAeq
    court terme deja calcule par voie dans resultatsBase (app.js), et les
@@ -12,8 +13,16 @@
    ========================================================================= */
 
 let volGps = null;                 // { temps, lat, lon, alt, altitudeDisponible, instantAbsoluDebut, nomFichier }
-let volAccel = [null, null];       // par telephone esclave
-let volDecalages = { gps: 0, accel0: 0, accel1: 0 }; // secondes ajoutees au temps natif du fichier phyphox pour rejoindre le temps WAV
+
+// Accelerometres esclaves : nombre variable selon le vol (0 a VOL_MAX_ACCEL),
+// une zone de depot par element du tableau. volAccel[i] = donnees parsees
+// (ou null si la zone i est encore vide) ; volDecalages.accel[i] = decalage
+// (s) de cette meme zone, independant de volAccel (un decalage peut avoir
+// ete regle a la main avant meme qu'un fichier y soit depose).
+const VOL_MAX_ACCEL = 4;
+let volAccel = [];
+let volNombreZonesAccel = 2;        // zones de depot affichees (2 par defaut, "+ Ajouter" jusqu'a VOL_MAX_ACCEL)
+let volDecalages = { gps: 0, accel: [] }; // secondes ajoutees au temps natif du fichier phyphox pour rejoindre le temps WAV
 let volZoomMin = null, volZoomMax = null; // minutes ; null = domaine complet
 let volSurvolMinutes = null;
 let volDragEtat = null;
@@ -61,8 +70,9 @@ function volDomaineComplet() {
   let mn = 0, mx = wavData ? wavData.dureeS : 1;
   function etendre(temps) { for (const t of temps) { if (t < mn) mn = t; if (t > mx) mx = t; } }
   if (volGps) etendre(tempsCommunSecondes(volGps, volDecalages.gps));
-  if (volAccel[0]) etendre(tempsCommunSecondes(volAccel[0], volDecalages.accel0));
-  if (volAccel[1]) etendre(tempsCommunSecondes(volAccel[1], volDecalages.accel1));
+  for (let i = 0; i < volAccel.length; i++) {
+    if (volAccel[i]) etendre(tempsCommunSecondes(volAccel[i], volDecalages.accel[i] || 0));
+  }
   return { min: mn/60, max: mx/60 };
 }
 
@@ -118,10 +128,10 @@ function rendreOngletVol(conteneur) {
   colGauche.appendChild(creerBlocGraphique("vol-altitude", "Altitude du vol",
     (canvas) => { const { xMin, xMax } = domaineCourant(); dessinerAltitudeVol(canvas, xMin, xMax); },
     () => `${baseNomFichier()}_vol_altitude.png`));
-  colGauche.appendChild(creerBlocGraphique("vol-son", "Niveau sonore, LAeq court terme (1 s), 4 voies",
+  colGauche.appendChild(creerBlocGraphique("vol-son", `Niveau sonore, LAeq court terme (1 s), ${voiesAnalysees().length} voies`,
     (canvas) => { const { xMin, xMax } = domaineCourant(); dessinerSonVol(canvas, xMin, xMax); },
     () => `${baseNomFichier()}_vol_son.png`));
-  colGauche.appendChild(creerBlocGraphique("vol-accel", "Accélération linéaire (magnitude), 2 téléphones",
+  colGauche.appendChild(creerBlocGraphique("vol-accel", libelleAccelVol(volAccel.filter(Boolean).length),
     (canvas) => { const { xMin, xMax } = domaineCourant(); dessinerAccelVol(canvas, xMin, xMax); },
     () => `${baseNomFichier()}_vol_acceleration.png`));
 
@@ -153,6 +163,14 @@ function rendreOngletVol(conteneur) {
 }
 
 /* ------------------------------------------------------------ depot phyphox */
+// Libelle du graphique d'acceleration, adapte au nombre d'accelerometres
+// reellement CHARGES (pas au nombre de zones de depot affichees) : plus de
+// "2 telephones" fige, correct que 0, 1, 2, 3 ou 4 exports soient presents.
+function libelleAccelVol(nCharges) {
+  if (nCharges === 0) return "Accélération linéaire (magnitude)";
+  return `Accélération linéaire (magnitude), ${nCharges} téléphone${nCharges>1?"s":""}`;
+}
+
 function creerZoneDepotVol() {
   const wrap = document.createElement("div");
   wrap.className = "vol-depots no-print";
@@ -163,32 +181,40 @@ function creerZoneDepotVol() {
       const donnees = parserGpsPhyphox(await f.text());
       donnees.nomFichier = f.name;
       volGps = donnees;
-      appliquerRecalageAutomatique("gps", donnees.instantAbsoluDebut);
+      appliquerRecalageAutomatique(donnees.instantAbsoluDebut, (dec) => { volDecalages.gps = dec; });
     },
-    decalageCle: "gps",
+    decalageValeur: () => volDecalages.gps,
+    decalageSet: (v) => { volDecalages.gps = v; },
   }));
 
-  wrap.appendChild(creerBlocDepotVol({
-    titre: "Export accéléromètre phyphox (Accélération linéaire), téléphone esclave 1",
-    onFichier: async (f) => {
-      const donnees = parserAccelPhyphox(await f.text());
-      donnees.nomFichier = f.name;
-      volAccel[0] = donnees;
-      appliquerRecalageAutomatique("accel0", donnees.instantAbsoluDebut);
-    },
-    decalageCle: "accel0",
-  }));
+  // Nombre variable de zones de depot accelerometre (2 par defaut, jusqu'a
+  // VOL_MAX_ACCEL) : structure en liste plutot que deux variables/slots fixes
+  // (volAccel[0]/volAccel[1] codes en dur auparavant), pour suivre le nombre
+  // reel de telephones esclaves embarques, different a chaque vol.
+  for (let i = 0; i < volNombreZonesAccel; i++) {
+    wrap.appendChild(creerBlocDepotVol({
+      titre: `Export accéléromètre phyphox (Accélération linéaire), téléphone esclave ${i+1}`,
+      onFichier: async (f) => {
+        const donnees = parserAccelPhyphox(await f.text());
+        donnees.nomFichier = f.name;
+        volAccel[i] = donnees;
+        appliquerRecalageAutomatique(donnees.instantAbsoluDebut, (dec) => { volDecalages.accel[i] = dec; });
+      },
+      decalageValeur: () => volDecalages.accel[i] || 0,
+      decalageSet: (v) => { volDecalages.accel[i] = v; },
+    }));
+  }
 
-  wrap.appendChild(creerBlocDepotVol({
-    titre: "Export accéléromètre phyphox (Accélération linéaire), téléphone esclave 2",
-    onFichier: async (f) => {
-      const donnees = parserAccelPhyphox(await f.text());
-      donnees.nomFichier = f.name;
-      volAccel[1] = donnees;
-      appliquerRecalageAutomatique("accel1", donnees.instantAbsoluDebut);
-    },
-    decalageCle: "accel1",
-  }));
+  if (volNombreZonesAccel < VOL_MAX_ACCEL) {
+    const btnAjouter = document.createElement("button");
+    btnAjouter.type = "button"; btnAjouter.className = "secondaire";
+    btnAjouter.textContent = "+ Ajouter un accéléromètre";
+    btnAjouter.addEventListener("click", () => {
+      volNombreZonesAccel++;
+      activerOnglet("vol"); // reconstruit l'onglet, une zone de depot supplementaire apparait
+    });
+    wrap.appendChild(btnAjouter);
+  }
 
   return wrap;
 }
@@ -197,15 +223,23 @@ function creerZoneDepotVol() {
 // fichier phyphox exposent un horodatage absolu (cf. avertissement dans
 // phyphox.js — rarement le cas pour un export CSV standard). Sinon le
 // decalage reste a la valeur courante (0 par defaut, ou deja reglee a la
-// main) : c'est le filet de securite demande.
-function appliquerRecalageAutomatique(cle, instantAbsoluFichier) {
+// main) : c'est le filet de securite demande. `setDecalage` generalise
+// l'ancien acces par cle fixe (volDecalages.gps / volDecalages.accel0 /
+// volDecalages.accel1) a n'importe quel emplacement du nouveau tableau
+// volDecalages.accel.
+function appliquerRecalageAutomatique(instantAbsoluFichier, setDecalage) {
   const instantAbsoluWav = extraireHorodatageTxt(txtTexte);
   if (instantAbsoluWav && instantAbsoluFichier) {
-    volDecalages[cle] = (instantAbsoluFichier.getTime() - instantAbsoluWav.getTime()) / 1000;
+    setDecalage((instantAbsoluFichier.getTime() - instantAbsoluWav.getTime()) / 1000);
   }
 }
 
-function creerBlocDepotVol({ titre, onFichier, decalageCle }) {
+// Bloc de depot generique (GPS ou accelerometre) : decalageValeur/decalageSet
+// remplacent l'ancienne cle fixe unique, pour que GPS (volDecalages.gps) et
+// chaque accelerometre (volDecalages.accel[i]) partagent le meme composant
+// sans dupliquer sa logique — seul ce point est partage, le reste du
+// traitement du GPS (parsing, carte, export KML) reste inchange.
+function creerBlocDepotVol({ titre, onFichier, decalageValeur, decalageSet }) {
   const bloc = document.createElement("div");
   bloc.className = "vol-depot";
 
@@ -231,9 +265,9 @@ function creerBlocDepotVol({ titre, onFichier, decalageCle }) {
   labelDecalage.appendChild(document.createTextNode("Décalage (s) : "));
   const inputDecalage = document.createElement("input");
   inputDecalage.type = "number"; inputDecalage.step = "0.1";
-  inputDecalage.value = String(volDecalages[decalageCle]);
+  inputDecalage.value = String(decalageValeur());
   inputDecalage.addEventListener("input", () => {
-    volDecalages[decalageCle] = parseFloat(inputDecalage.value) || 0;
+    decalageSet(parseFloat(inputDecalage.value) || 0);
     redessinerVol();
   });
   labelDecalage.appendChild(inputDecalage);
@@ -244,7 +278,7 @@ function creerBlocDepotVol({ titre, onFichier, decalageCle }) {
     erreurDiv.style.display = "none";
     try {
       await onFichier(input.files[0]);
-      inputDecalage.value = String(volDecalages[decalageCle]);
+      inputDecalage.value = String(decalageValeur());
       nomFichierDiv.textContent = "Chargé : " + input.files[0].name;
       redessinerVol();
     } catch (err) {
@@ -278,38 +312,41 @@ function redessinerVol() {
 }
 
 function dessinerSonVol(canvas, xMin, xMax) {
+  const voies = voiesAnalysees();
   const series = [];
-  for (let v = 0; v < resultatsBase.length; v++) {
+  for (const v of voies) {
     const r = resultatsBase[v];
     series.push({ xs: r.temporel.temps.map(t => t/60), ys: r.temporel.niveaux, couleur: PALETTE_VOIES[v], label: nomVoie(v) });
   }
   tracerCourbe(canvas, series, {
-    titre: "Niveau sonore, LAeq court terme (1 s), 4 voies",
+    titre: `Niveau sonore, LAeq court terme (1 s), ${voies.length} voie${voies.length>1?"s":""}`,
     xlabel: "temps (min)", ylabel: `niveau (${uniteCourante()})`,
     xMin, xMax,
   });
 }
 
 function dessinerAccelVol(canvas, xMin, xMax) {
-  const labels = ["Téléphone esclave 1", "Téléphone esclave 2"];
-  const couleurs = ["#0f4c5c", "#c98a3b"];
   const series = [];
-  for (let i = 0; i < 2; i++) {
+  for (let i = 0; i < volAccel.length; i++) {
     if (!volAccel[i]) continue;
-    const decalage = volDecalages["accel"+i];
-    series.push({ xs: volAccel[i].temps.map(t => (t+decalage)/60), ys: volAccel[i].magnitude, couleur: couleurs[i], label: labels[i] });
+    const decalage = volDecalages.accel[i] || 0;
+    series.push({
+      xs: volAccel[i].temps.map(t => (t+decalage)/60), ys: volAccel[i].magnitude,
+      couleur: PALETTE_VOIES[i % PALETTE_VOIES.length], label: `Téléphone esclave ${i+1}`,
+    });
   }
+  const titre = libelleAccelVol(series.length);
   if (!series.length) {
     const { ctx, w, h } = preparerCanvas(canvas);
     ctx.clearRect(0,0,w,h);
     ctx.font = "13px sans-serif"; ctx.fillStyle = "#20242b";
-    ctx.fillText("Accélération linéaire (magnitude), 2 téléphones", 52, 16);
+    ctx.fillText(titre, 52, 16);
     ctx.fillStyle = "#5b6270";
-    ctx.fillText("Déposez un export accéléromètre phyphox ci-dessus pour afficher cette courbe.", 52, h/2);
+    ctx.fillText("Aucun accéléromètre importé. Déposez un export accéléromètre phyphox ci-dessus pour afficher cette courbe.", 52, h/2);
     return;
   }
   tracerCourbe(canvas, series, {
-    titre: "Accélération linéaire (magnitude), 2 téléphones",
+    titre,
     xlabel: "temps (min)", ylabel: "accélération (m/s²)",
     xMin, xMax,
   });
