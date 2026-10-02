@@ -731,10 +731,29 @@ function rendreOngletComparaison(conteneur) {
   }
   conteneur.appendChild(cases);
 
+  // Voies cochees ci-dessus : elles seules apparaissent sur les deux
+  // graphiques et dans le tableau des niveaux globaux.
+  const cochees = voies.filter(v => comparaisonSelection[v]);
+
+  // Melange de voies etalonnees (dB SPL) et non etalonnees (dBFS) parmi les
+  // voies cochees : leurs niveaux ne sont pas comparables entre eux, alors
+  // que uniteCourante() affiche "dB SPL" des qu'une seule voie l'est.
+  const voiesSpl = cochees.filter(v => resultatsBase[v].calibre);
+  const voiesDbfs = cochees.filter(v => !resultatsBase[v].calibre);
+  const melange = voiesSpl.length > 0 && voiesDbfs.length > 0;
+  if (melange) {
+    const note = document.createElement("div");
+    note.className = "avertissement avertissement-melange-unites";
+    note.textContent = `Unités mélangées : ${voiesSpl.map(nomVoie).join(", ")} en dB SPL (étalonnée${voiesSpl.length>1?"s":""}), ` +
+      `${voiesDbfs.map(nomVoie).join(", ")} en dBFS (non étalonnée${voiesDbfs.length>1?"s":""}). ` +
+      `Les niveaux en dB SPL et en dBFS ne sont pas comparables entre eux, ni sur les graphiques ni dans le tableau ci-dessous. ` +
+      `L'axe vertical indique dB SPL, mais les courbes des voies non étalonnées restent en dBFS.`;
+    conteneur.appendChild(note);
+  }
+
   const unite = uniteCourante();
   const series = [];
-  for (const v of voies) {
-    if (!comparaisonSelection[v]) continue;
+  for (const v of cochees) {
     const { freqs, psdCorrige } = obtenirPsd(v);
     series.push({ xs: Array.from(freqs), ys: psdEnDb(psdCorrige, resultatsBase[v].pref), couleur: PALETTE_VOIES[v], label: nomVoie(v) });
   }
@@ -742,10 +761,94 @@ function rendreOngletComparaison(conteneur) {
   conteneur.appendChild(creerBlocGraphique("comparaison-spectre",
     titreGraphique,
     (canvas)=>{
-      if (!series.length) { const {ctx,w,h} = preparerCanvas(canvas); ctx.clearRect(0,0,w,h); ctx.fillStyle="#5b6270"; ctx.font="13px sans-serif"; ctx.fillText("Sélectionnez au moins une voie ci-dessus.", 20, 30); return; }
+      if (!series.length) { dessinerMessageAucuneVoie(canvas); return; }
       tracerCourbe(canvas, series, { titre: titreGraphique, xlabel: "fréquence (Hz)", ylabel: `niveau (${unite})`, logX: true, xMin: 20, xMax: wavData.fs/2, formatX: formatHz });
     },
     () => `${baseNomFichier()}_comparaison-spectre.png`));
+
+  // Niveau court terme : memes donnees que la courbe "Evolution du niveau
+  // dans le temps" de chaque onglet Voie (resultatsBase[v].temporel), axe
+  // en secondes comme dans ces onglets, quelle que soit la duree du fichier.
+  const titreNiveaux = `Comparaison des niveaux sonores, LAeq court terme (1 s), ${voies.length} voie${voies.length>1?"s":""}` +
+    (melange ? " (dB SPL et dBFS mélangés, non comparables)" : "");
+  const seriesNiveaux = cochees.map(v => ({
+    xs: resultatsBase[v].temporel.temps, ys: resultatsBase[v].temporel.niveaux, couleur: PALETTE_VOIES[v], label: nomVoie(v),
+  }));
+
+  conteneur.appendChild(creerBlocGraphique("comparaison-niveaux",
+    titreNiveaux,
+    (canvas)=>{
+      if (!seriesNiveaux.length) { dessinerMessageAucuneVoie(canvas); return; }
+      if (!seriesNiveaux.some(s => s.xs.length)) { dessinerMessageAucuneVoie(canvas, "Fichier trop court pour un niveau sur des fenêtres de 1 s."); return; }
+      tracerCourbe(canvas, seriesNiveaux, { titre: titreNiveaux, xlabel: "temps (s)", ylabel: `niveau (${unite})` });
+    },
+    () => `${baseNomFichier()}_comparaison-niveaux.png`));
+
+  conteneur.appendChild(creerTableauNiveauxComparaison(cochees));
+}
+
+const MESSAGE_AUCUNE_VOIE = "Sélectionnez au moins une voie ci-dessus.";
+
+function dessinerMessageAucuneVoie(canvas, message) {
+  const {ctx,w,h} = preparerCanvas(canvas);
+  ctx.clearRect(0,0,w,h); ctx.fillStyle="#5b6270"; ctx.font="13px sans-serif";
+  ctx.fillText(message || MESSAGE_AUCUNE_VOIE, 20, 30);
+}
+
+// Voies signalees "niveau anormalement faible" (meme critere que la page
+// d'accueil, calculerAvertissementsNiveaux), memorisees pour l'analyse en
+// cours : le calcul relit le signal brut complet de chaque voie, inutile de
+// le refaire a chaque coche ou decoche dans l'onglet Comparaison.
+let avertissementsComparaison = { base: null, avert: [] };
+function voiesFaiblesComparaison() {
+  if (avertissementsComparaison.base !== resultatsBase) {
+    avertissementsComparaison = { base: resultatsBase, avert: calculerAvertissementsNiveaux(niveauxRapidesParVoie()) };
+  }
+  return avertissementsComparaison.avert;
+}
+
+// Tableau des niveaux globaux des voies cochees : memes valeurs, meme
+// formatage et meme unite par voie que les cartes de l'onglet Voie
+// (niveauxGlobaux, formaterNiveau, uniteVoie). Une voie signalee faible
+// reste affichee, avec le meme badge que sur la page d'accueil.
+function creerTableauNiveauxComparaison(cochees) {
+  const bloc = document.createElement("div");
+  bloc.className = "tableau-niveaux-comparaison";
+  bloc.id = "tableau-niveaux-comparaison";
+
+  const titre = document.createElement("h3");
+  titre.textContent = "Niveaux globaux sur toute la durée";
+  bloc.appendChild(titre);
+
+  if (!cochees.length) {
+    const p = document.createElement("p");
+    p.className = "note";
+    p.textContent = MESSAGE_AUCUNE_VOIE;
+    bloc.appendChild(p);
+    return bloc;
+  }
+
+  const avert = voiesFaiblesComparaison();
+  const enTetes = niveauxGlobaux(resultatsBase[cochees[0]]).map(([label]) => `<th>${label}</th>`).join("");
+  const lignes = cochees.map(v => {
+    const r = resultatsBase[v];
+    const badgeFaible = avert[v] ? ` <span class="badge-niveau-faible">⚠ signal anormalement faible</span>` : "";
+    const cellules = niveauxGlobaux(r).map(([, val]) => `<td>${formaterNiveau(val)}</td>`).join("");
+    return `<tr data-voie="${v}"><td><span class="pastille" style="background:${PALETTE_VOIES[v]}"></span>${nomVoie(v)}${badgeFaible}</td>${cellules}<td>${uniteVoie(v)}</td></tr>`;
+  }).join("");
+  const table = document.createElement("table");
+  table.innerHTML = `<thead><tr><th>Voie</th>${enTetes}<th>Unité</th></tr></thead><tbody>${lignes}</tbody>`;
+  bloc.appendChild(table);
+
+  const faibles = cochees.filter(v => avert[v]).map(nomVoie);
+  if (faibles.length) {
+    const note = document.createElement("p");
+    note.className = "note";
+    note.textContent = `${faibles.join(", ")} ${faibles.length>1?"ont été signalées":"a été signalée"} avec un signal anormalement faible sur la page d'accueil (micro débranché ou mal connecté possible). ` +
+      `${faibles.length>1?"Elles restent affichées":"Elle reste affichée"} ici : ${faibles.length>1?"décochez-les ci-dessus pour les retirer":"décochez-la ci-dessus pour la retirer"} de la comparaison.`;
+    bloc.appendChild(note);
+  }
+  return bloc;
 }
 
 /* ------------------------------------------------------------- onglet capteur */
