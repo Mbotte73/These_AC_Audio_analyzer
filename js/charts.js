@@ -57,6 +57,63 @@ function formatHz(v) {
   return (Math.round(v*100)/100).toString();
 }
 
+/* ------------------------------------------------------ titres d'axes */
+// Police des titres d'axes, et abscisse (px CSS) de la ligne de base du
+// titre vertical : une fois tourne d'un quart de tour, ses jambages hauts
+// (accents compris) s'etendent vers la gauche jusqu'a ~2 px du bord du
+// canvas, ses jambages bas vers la droite jusqu'a ~16 px, avant les
+// graduations de l'axe (alignees a droite sur M.l - 6).
+const POLICE_TITRE_AXE = "12px sans-serif";
+const X_TITRE_AXE_Y = 13;
+const ECART_TITRE_GRADUATIONS = 3;
+
+// Texte raccourci avec une ellipse s'il depasse largeurMax (police du
+// contexte courant), plutot que de le laisser deborder du canvas.
+function texteTronque(ctx, texte, largeurMax) {
+  if (ctx.measureText(texte).width <= largeurMax) return texte;
+  let n = texte.length;
+  while (n > 0 && ctx.measureText(texte.slice(0, n).trimEnd() + "…").width > largeurMax) n--;
+  return n > 0 ? texte.slice(0, n).trimEnd() + "…" : "";
+}
+
+// Bord droit (px CSS) occupe par le titre vertical une fois tourne.
+function bordDroitTitreAxeY(ctx) {
+  ctx.save();
+  ctx.font = POLICE_TITRE_AXE;
+  const m = ctx.measureText("Mg(é)");
+  ctx.restore();
+  return X_TITRE_AXE_Y + (m.fontBoundingBoxDescent ?? m.actualBoundingBoxDescent ?? 3);
+}
+
+// Marge gauche suffisante pour loger, de gauche a droite : le titre vertical,
+// un petit ecart, les graduations de l'axe Y (alignees a droite sur
+// margeMin - 6), sans chevauchement. Ne fait que l'elargir si des
+// graduations longues (signe moins, 4 chiffres...) l'exigent.
+function margeGaucheAxeY(ctx, libellesGraduations, margeMin) {
+  let largeur = 0;
+  for (const t of libellesGraduations) largeur = Math.max(largeur, ctx.measureText(t).width);
+  return Math.max(margeMin, Math.ceil(bordDroitTitreAxeY(ctx) + ECART_TITRE_GRADUATIONS + largeur + 6));
+}
+
+// Titres d'axes d'une zone de trace { gauche, droite, haut, bas } (px CSS) :
+// le titre horizontal aligne sur le bord droit de la zone, sous les
+// graduations ; le titre vertical centre sur la hauteur de la zone.
+function dessinerTitresAxes(ctx, h, zone, xlabel, ylabel) {
+  ctx.save();
+  ctx.font = POLICE_TITRE_AXE; ctx.fillStyle = "#5b6270";
+  if (xlabel) {
+    ctx.textAlign = "right"; ctx.textBaseline = "alphabetic";
+    ctx.fillText(texteTronque(ctx, xlabel, zone.droite - zone.gauche), zone.droite, h-4);
+  }
+  if (ylabel) {
+    const hauteur = zone.bas - zone.haut;
+    ctx.translate(X_TITRE_AXE_Y, zone.haut + hauteur/2); ctx.rotate(-Math.PI/2);
+    ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+    ctx.fillText(texteTronque(ctx, ylabel, hauteur), 0, 0);
+  }
+  ctx.restore();
+}
+
 /* ------------------------------------------------------- export PNG */
 function exporterCanvasPng(canvas, nomFichier) {
   const a = document.createElement("a");
@@ -84,8 +141,6 @@ function tracerCourbe(canvas, series, opts) {
   const M = { l: 52, r: 16, t: legende ? 40 : 26, b: 40 };
   ctx.clearRect(0,0,w,h);
   ctx.font = "13px sans-serif";
-  ctx.fillStyle = "#20242b";
-  ctx.fillText(opts.titre || "", M.l, 16);
 
   const logX = !!opts.logX;
   const xMin = opts.xMin ?? series[0].xs[0], xMax = opts.xMax ?? series[0].xs[series[0].xs.length-1];
@@ -111,6 +166,11 @@ function tracerCourbe(canvas, series, opts) {
   if (!isFinite(yMin) || !isFinite(yMax)) { yMin = 0; yMax = 1; }
   if (yMax - yMin < 1) { yMax += 0.5; yMin -= 0.5; }
 
+  const ticksY = ticksLineaires(yMin, yMax, 6);
+  if (opts.ylabel) M.l = margeGaucheAxeY(ctx, ticksY.map(v => v.toFixed(0)), M.l);
+  ctx.fillStyle = "#20242b";
+  ctx.fillText(opts.titre || "", M.l, 16);
+
   function px(x) {
     if (logX) return M.l + (Math.log10(Math.max(x,1e-6))-Math.log10(xMin))/(Math.log10(xMax)-Math.log10(xMin))*(w-M.l-M.r);
     return M.l + (x-xMin)/(xMax-xMin)*(w-M.l-M.r);
@@ -118,7 +178,6 @@ function tracerCourbe(canvas, series, opts) {
   function py(y) { return h-M.b - (y-yMin)/(yMax-yMin)*(h-M.t-M.b); }
 
   // grille + graduations Y
-  const ticksY = ticksLineaires(yMin, yMax, 6);
   ctx.textAlign = "right"; ctx.textBaseline = "middle";
   for (const val of ticksY) {
     const y = py(val);
@@ -198,15 +257,8 @@ function tracerCourbe(canvas, series, opts) {
     }
   }
 
-  // labels d'axes
-  ctx.textAlign = "left"; ctx.textBaseline = "alphabetic"; ctx.font = "12px sans-serif";
-  ctx.fillStyle = "#5b6270";
-  ctx.fillText(opts.xlabel || "", w-M.r-90, h-4);
-  if (opts.ylabel) {
-    ctx.save(); ctx.translate(12, M.t+10); ctx.rotate(-Math.PI/2);
-    ctx.fillText(opts.ylabel, 0, 0);
-    ctx.restore();
-  }
+  // titres d'axes
+  dessinerTitresAxes(ctx, h, { gauche: M.l, droite: w-M.r, haut: M.t, bas: h-M.b }, opts.xlabel, opts.ylabel);
 }
 
 /* --------------------------------------------------------------- barres */
@@ -390,9 +442,6 @@ function tracerSpectrogramme(canvas, freqs, temps, trames, opts) {
   ctx.fillText(vmax.toFixed(0), barX+barW+3, M.t+4);
   ctx.fillText(vmin.toFixed(0), barX+barW+3, M.t+plotH-4);
 
-  ctx.textAlign="left"; ctx.textBaseline="alphabetic"; ctx.font="12px sans-serif"; ctx.fillStyle="#5b6270";
-  ctx.fillText(opts.xlabel || "temps (s)", w-M.r-70, h-4);
-  ctx.save(); ctx.translate(14, M.t+plotH/2); ctx.rotate(-Math.PI/2);
-  ctx.fillText(opts.ylabel || "fréquence (Hz)", -30, 0);
-  ctx.restore();
+  dessinerTitresAxes(ctx, h, { gauche: M.l, droite: M.l+plotW, haut: M.t, bas: M.t+plotH },
+    opts.xlabel || "temps (s)", opts.ylabel || "fréquence (Hz)");
 }
