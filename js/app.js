@@ -626,6 +626,15 @@ function creerTitreImpression(texte) {
   return h;
 }
 
+// Niveaux globaux d'une voie, dans l'ordre d'affichage, et leur formatage :
+// partages entre les cartes "synthese-niveaux" de l'onglet Voie et le
+// tableau de l'onglet Comparaison, pour que les deux affichent exactement
+// les memes valeurs (lues dans resultatsBase, jamais recalculees).
+function niveauxGlobaux(r) {
+  return [["OASPL", r.leqZ], ["LAeq", r.leqA], ["LCeq", r.leqC], ["LCpeak", r.lcpeak], ["LAFmax", r.lafmax]];
+}
+function formaterNiveau(val) { return isFinite(val) ? val.toFixed(1) : "—"; }
+
 function rendreOngletVoie(v, conteneur) {
   const r = resultatsBase[v];
   const unite = uniteVoie(v);
@@ -635,10 +644,7 @@ function rendreOngletVoie(v, conteneur) {
 
   const cartes = document.createElement("div");
   cartes.className = "synthese-niveaux";
-  const items = [
-    ["OASPL", r.leqZ], ["LAeq", r.leqA], ["LCeq", r.leqC], ["LCpeak", r.lcpeak], ["LAFmax", r.lafmax],
-  ];
-  cartes.innerHTML = items.map(([label,val])=>`<div class="carte"><div class="valeur">${isFinite(val)?val.toFixed(1):"—"}</div><div class="label">${label} (${unite})</div></div>`).join("");
+  cartes.innerHTML = niveauxGlobaux(r).map(([label,val])=>`<div class="carte"><div class="valeur">${formaterNiveau(val)}</div><div class="label">${label} (${unite})</div></div>`).join("");
   conteneur.appendChild(cartes);
 
   const { freqs, psdCorrige, bandesA } = obtenirPsd(v);
