@@ -83,10 +83,34 @@ function afficherAvertissementDepot(texte) {
   div.style.display = ""; div.textContent = texte;
 }
 
+// Nombre de depots (appels a traiterFichiers contenant un WAV ou un TXT) dont
+// la lecture n'est pas terminee. Le bouton Analyser reste desactive tant que
+// ce compteur n'est pas revenu a 0 : sinon un clic juste apres la lecture du
+// WAV, avant celle du TXT d'etalonnage, lancerait une analyse non etalonnee.
+// Incremente avant le premier await, decremente dans un finally (succes ou
+// erreur de lecture), pour que le bouton ne reste jamais bloque.
+let lecturesEnCours = 0;
+// Vrai pendant demarrerAnalyse : une fin de lecture de fichier ne doit pas
+// reactiver le bouton au milieu d'un calcul.
+let analyseEnCours = false;
+
 async function traiterFichiers(liste) {
   const fichiers = Array.from(liste);
   const fichierWav = fichiers.find(f => /\.wav$/i.test(f.name));
   const fichierTxt = fichiers.find(f => /\.txt$/i.test(f.name));
+  if (!fichierWav && !fichierTxt) return lireFichiersDeposes(fichiers, fichierWav, fichierTxt);
+
+  lecturesEnCours++;
+  mettreAJourBoutonAnalyser();
+  try {
+    await lireFichiersDeposes(fichiers, fichierWav, fichierTxt);
+  } finally {
+    lecturesEnCours--;
+    mettreAJourBoutonAnalyser();
+  }
+}
+
+async function lireFichiersDeposes(fichiers, fichierWav, fichierTxt) {
   const inconnus = fichiers.filter(f => f !== fichierWav && f !== fichierTxt);
 
   let avertissement = "";
@@ -103,8 +127,8 @@ async function traiterFichiers(liste) {
 
   if (fichierWav) {
     statut.textContent = `Lecture de ${fichierWav.name}…`;
-    const buf = await fichierWav.arrayBuffer();
     try {
+      const buf = await fichierWav.arrayBuffer();
       wavData = lireWav(buf);
       wavData.nomFichier = fichierWav.name;
       document.getElementById("nomWav").textContent =
@@ -122,9 +146,16 @@ async function traiterFichiers(liste) {
 
   if (fichierTxt) {
     statut.textContent = `Lecture de ${fichierTxt.name}…`;
-    txtTexte = await fichierTxt.text();
-    document.getElementById("nomTxt").textContent = "Métadonnées : " + fichierTxt.name;
-    statut.textContent = "";
+    try {
+      txtTexte = await fichierTxt.text();
+      document.getElementById("nomTxt").textContent = "Métadonnées : " + fichierTxt.name;
+    } catch(err) {
+      alert("Erreur de lecture du fichier TXT : " + err.message);
+      txtTexte = null;
+      document.getElementById("nomTxt").textContent = "";
+    } finally {
+      statut.textContent = "";
+    }
   }
 
   if (fichierWav && fichierTxt && baseNomSansExt(fichierWav.name) !== baseNomSansExt(fichierTxt.name)) {
@@ -183,9 +214,10 @@ function masquerSelectionVoies() {
 function mettreAJourBoutonAnalyser() {
   const bouton = document.getElementById("btnAnalyser");
   const n = voiesSelectionnees.filter(Boolean).length;
+  if (lecturesEnCours > 0) { bouton.textContent = "Lecture des fichiers en cours…"; bouton.disabled = true; return; }
   if (!wavData) { bouton.textContent = "Analyser"; bouton.disabled = true; return; }
   bouton.textContent = n > 0 ? `Analyser (${n} voie${n>1?"s":""} sélectionnée${n>1?"s":""})` : "Analyser";
-  bouton.disabled = n === 0;
+  bouton.disabled = n === 0 || analyseEnCours;
 }
 
 function rendreSelectionVoies() {
@@ -261,14 +293,14 @@ function configurerZoneDepot() {
 configurerZoneDepot();
 
 document.getElementById("btnAnalyser").addEventListener("click", async ()=>{
-  if (!wavData || !voiesSelectionnees.some(Boolean)) return;
+  if (!wavData || !voiesSelectionnees.some(Boolean) || lecturesEnCours > 0 || analyseEnCours) return;
   calibration = lireCalibration(txtTexte);
-  const bouton = document.getElementById("btnAnalyser");
-  bouton.disabled = true;
+  analyseEnCours = true;
+  mettreAJourBoutonAnalyser();
   // try/finally : si demarrerAnalyse echoue (fichier tres volumineux,
   // memoire insuffisante...), le bouton doit rester utilisable pour
   // reessayer plutot que de bloquer l'interface (point 3, garde-fou).
-  try { await demarrerAnalyse(); } finally { bouton.disabled = false; }
+  try { await demarrerAnalyse(); } finally { analyseEnCours = false; mettreAJourBoutonAnalyser(); }
 });
 
 function attendreProchaineImage() { return new Promise(r => requestAnimationFrame(r)); }
