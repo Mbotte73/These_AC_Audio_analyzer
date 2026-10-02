@@ -11,7 +11,7 @@
 // Numero de version affiche en pied de page (pas d'etape de build dans cet
 // outil : a incrementer ICI a la main a chaque evolution notable, avec la
 // date du jour). Seule constante a modifier pour changer l'indicateur.
-const VERSION_OUTIL = "v1.6 — 27 sept. 2026";
+const VERSION_OUTIL = "v1.7 — 2 oct. 2026";
 document.getElementById("pieDeVersion").textContent = VERSION_OUTIL;
 
 function nomVoie(i) { return `Voie ${i+1}`; }
