@@ -2,31 +2,25 @@
 /* =========================================================================
    Service worker de la telecommande phyphox.
 
-   Objectif unique : garder une copie locale (cache du navigateur) de la
-   page et de ses quelques fichiers, pour qu'elle puisse se rouvrir depuis
-   l'icone de l'ecran d'accueil meme sans aucun acces internet — situation
-   frequente sur le terrain, une fois le telephone de l'operateur bascule
-   sur le reseau Wi-Fi local forme par les telephones phyphox (qui n'a pas
-   d'acces internet).
+   Role unique : garder une copie locale de la page et de ses quelques
+   fichiers, pour qu'elle se rouvre depuis l'icone de l'ecran d'accueil meme
+   sans acces internet.
 
-   Important : ce service worker est servi depuis le dossier telecommande/
-   et sa portee (scope) par defaut est donc limitee a ce dossier — il ne
-   touche jamais aux pages de l'outil d'analyse acoustique, servies depuis
-   la racine du meme site.
+   Portee : ce fichier est servi depuis le dossier telecommande/, sa portee
+   est donc limitee a ce dossier ; il ne touche jamais aux pages de l'outil
+   d'analyse acoustique.
 
-   Ce fichier ne concerne QUE le chargement de cette page elle-meme. Les
-   commandes envoyees aux telephones esclaves (control?cmd=..., export?...)
-   partent vers d'autres adresses (les telephones, sur le reseau local),
-   dans de nouveaux onglets ouverts par la page : elles ne passent jamais
-   par ce service worker (qui ne s'applique qu'aux requetes vers sa propre
-   origine) et continuent donc de fonctionner exactement comme avant,
-   reseau local ou pas.
+   IMPORTANT (v2) : la page dialogue desormais directement avec les
+   esclaves phyphox (fetch vers http://192.168.x.x:8080/...). Ces requetes
+   passeraient par ce service worker si on ne les excluait pas, et une
+   reponse mise en cache (par exemple a /control?cmd=start) pourrait etre
+   renvoyee sans que la commande atteigne jamais l'esclave. Seules les
+   requetes vers le site de la page elle-meme sont donc traitees ici ;
+   toutes les autres partent directement sur le reseau, sans cache.
 */
 
-// A incrementer (v2, v3...) a chaque modification de la page, pour que les
-// telephones deja installes recuperent la nouvelle version des qu'ils ont
-// a nouveau du reseau.
-const CACHE_NAME = "telecommande-phyphox-v1";
+// A incrementer a chaque modification de la page.
+const CACHE_NAME = "telecommande-phyphox-2.0";
 
 const FICHIERS_A_METTRE_EN_CACHE = [
   "./",
@@ -38,33 +32,37 @@ const FICHIERS_A_METTRE_EN_CACHE = [
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(FICHIERS_A_METTRE_EN_CACHE))
+    caches.open(CACHE_NAME).then((cache) =>
+      // "reload" : contourne le cache HTTP du navigateur, pour mettre en
+      // cache la version reellement en ligne et pas une copie perimee.
+      cache.addAll(FICHIERS_A_METTRE_EN_CACHE.map((u) => new Request(u, { cache: "reload" })))
+    )
   );
   self.skipWaiting();
 });
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches.keys().then((noms) =>
-      Promise.all(noms.filter((n) => n !== CACHE_NAME).map((n) => caches.delete(n)))
-    )
+    caches.keys()
+      .then((noms) => Promise.all(noms.filter((n) => n !== CACHE_NAME).map((n) => caches.delete(n))))
+      .then(() => self.clients.claim())
   );
-  self.clients.claim();
 });
 
-// Cache d'abord (priorite a la fiabilite hors ligne), avec mise a jour
-// silencieuse du cache en arriere-plan des que le reseau repond — la
-// prochaine ouverture profite alors de la version la plus recente.
+// Cache d'abord (fiabilite hors ligne), avec mise a jour silencieuse du
+// cache en arriere-plan des que le reseau repond.
 self.addEventListener("fetch", (event) => {
-  if (event.request.method !== "GET") return;
+  const requete = event.request;
+  if (requete.method !== "GET") return;
+  if (new URL(requete.url).origin !== self.location.origin) return; // esclaves phyphox : jamais intercepte
 
   event.respondWith(
-    caches.match(event.request).then((reponseEnCache) => {
-      const recuperationReseau = fetch(event.request)
+    caches.match(requete, { ignoreSearch: true }).then((reponseEnCache) => {
+      const recuperationReseau = fetch(requete)
         .then((reponseReseau) => {
           if (reponseReseau && reponseReseau.ok) {
             const copie = reponseReseau.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copie));
+            caches.open(CACHE_NAME).then((cache) => cache.put(requete, copie));
           }
           return reponseReseau;
         })
