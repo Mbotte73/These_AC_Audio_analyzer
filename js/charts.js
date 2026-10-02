@@ -57,6 +57,17 @@ function formatHz(v) {
   return (Math.round(v*100)/100).toString();
 }
 
+// Nombre de decimales necessaires pour que des graduations regulieres
+// (ticksLineaires : pas de 1, 2 ou 5 x 10^k) restent distinctes une fois
+// ecrites : 0 pour un pas >= 1 (affichage inchange), 1 pour un pas de 0,5 ou
+// 0,2, 2 pour 0,05...
+function decimalesGraduations(ticks) {
+  if (ticks.length < 2) return 0;
+  const pas = Math.abs(ticks[1] - ticks[0]);
+  if (!(pas > 0) || pas >= 1) return 0;
+  return Math.ceil(-Math.log10(pas) - 1e-9);
+}
+
 /* ------------------------------------------------------ titres d'axes */
 // Police des titres d'axes, et abscisse (px CSS) de la ligne de base du
 // titre vertical : une fois tourne d'un quart de tour, ses jambages hauts
@@ -133,7 +144,10 @@ function boutonExportCanvas(canvas, nomFichierFn) {
 
 /* --------------------------------------------------------- courbe(s) */
 /* series : [{ xs, ys, couleur, label, tirets? }]
-   opts   : { titre, xlabel, ylabel, logX, xMin, xMax, yMin, yMax, formatX } */
+   opts   : { titre, xlabel, ylabel, logX, xMin, xMax, yMin, yMax, formatX, decimalesYAuto }
+   decimalesYAuto : graduations Y ecrites avec autant de decimales que le pas
+   l'exige (decimalesGraduations) au lieu d'entiers ; pour les grandeurs a
+   faible plage (acceleration en m/s²), ou des entiers se repeteraient. */
 function tracerCourbe(canvas, series, opts) {
   opts = opts || {};
   const { ctx, w, h } = preparerCanvas(canvas);
@@ -167,7 +181,8 @@ function tracerCourbe(canvas, series, opts) {
   if (yMax - yMin < 1) { yMax += 0.5; yMin -= 0.5; }
 
   const ticksY = ticksLineaires(yMin, yMax, 6);
-  if (opts.ylabel) M.l = margeGaucheAxeY(ctx, ticksY.map(v => v.toFixed(0)), M.l);
+  const decY = opts.decimalesYAuto ? decimalesGraduations(ticksY) : 0;
+  if (opts.ylabel) M.l = margeGaucheAxeY(ctx, ticksY.map(v => v.toFixed(decY)), M.l);
   ctx.fillStyle = "#20242b";
   ctx.fillText(opts.titre || "", M.l, 16);
 
@@ -183,7 +198,7 @@ function tracerCourbe(canvas, series, opts) {
     const y = py(val);
     ctx.strokeStyle = "#eeece6"; ctx.beginPath(); ctx.moveTo(M.l,y); ctx.lineTo(w-M.r,y); ctx.stroke();
     ctx.fillStyle = "#5b6270";
-    ctx.fillText(val.toFixed(0), M.l-6, y);
+    ctx.fillText(val.toFixed(decY), M.l-6, y);
   }
 
   // graduations X

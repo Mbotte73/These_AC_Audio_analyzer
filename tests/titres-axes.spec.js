@@ -24,7 +24,7 @@ async function espionnerTextes(page) {
       ].map(([a, b]) => t.transformPoint(new DOMPoint(a, b)));
       const xs = coins.map(p => p.x), ys = coins.map(p => p.y);
       window.__textes.push({
-        canvas: this.canvas.id, texte: String(texte), tourne: Math.abs(t.b) > 1e-6,
+        canvas: this.canvas.id, texte: String(texte), tourne: Math.abs(t.b) > 1e-6, alignement: this.textAlign,
         x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys),
         largeur: this.canvas.width, hauteur: this.canvas.height,
       });
@@ -92,6 +92,36 @@ for (const [mode, viewport] of [["bureau", { width: 1280, height: 900 }], ["mobi
       const textes = await textesApresRedessin(page, ids);
       verifierTitresAxes(textes, "c-comparaison-spectre", "niveau (dB SPL)", "fréquence (Hz)");
       verifierTitresAxes(textes, "c-comparaison-niveaux", "niveau (dB SPL)", "temps (s)");
+    });
+
+    test("onglet Vol : « altitude (m) » entier, graduations de l'accélération distinctes avec décimales", async ({ page }) => {
+      await espionnerTextes(page);
+      await chargerMesure(page, [100, 100, 100, 100]);
+      await page.locator('#tabsNav button[data-onglet="vol"]').click();
+      const dir = await fsNode.promises.mkdtemp(path.join(os.tmpdir(), "aac-test-axes-vol-"));
+      const gps = ["Time (s),Latitude (°),Longitude (°),Height (m)"];
+      const accel = ["Time (s),Linear Acceleration x (m/s^2),Linear Acceleration y (m/s^2),Linear Acceleration z (m/s^2)"];
+      for (let i = 0; i <= 3; i++) {
+        gps.push(`${i},${45 + i * 0.001},${5 + i * 0.001},${1000 + 10 * i}`);
+        accel.push(`${i},${2 + 0.45 * i},0,0`); // magnitude de 2 a 3,35 m/s² : pas de graduation inferieur a 1
+      }
+      fsNode.writeFileSync(path.join(dir, "gps.csv"), gps.join("\n"));
+      fsNode.writeFileSync(path.join(dir, "accel1.csv"), accel.join("\n"));
+      const depots = page.locator("#contenu-vol .vol-depot");
+      await depots.nth(0).locator('input[type="file"]').setInputFiles(path.join(dir, "gps.csv"));
+      await expect(depots.nth(0).locator(".filename")).toContainText("gps.csv");
+      await depots.nth(1).locator('input[type="file"]').setInputFiles(path.join(dir, "accel1.csv"));
+      await expect(depots.nth(1).locator(".filename")).toContainText("accel1.csv");
+
+      const ids = ["c-vol-altitude", "c-vol-accel"];
+      const textes = await textesApresRedessin(page, ids);
+      verifierTitresAxes(textes, "c-vol-altitude", "altitude (m)", "temps (min)");
+      verifierTitresAxes(textes, "c-vol-accel", "accélération (m/s²)", "temps (min)");
+
+      const graduationsY = textes.filter(t => t.canvas === "c-vol-accel" && !t.tourne && t.alignement === "right" && /^-?\d/.test(t.texte)).map(t => t.texte);
+      expect(graduationsY.length).toBeGreaterThanOrEqual(4);
+      expect(new Set(graduationsY).size, `graduations : ${graduationsY.join(", ")}`).toBe(graduationsY.length);
+      for (const g of graduationsY) expect(g).toMatch(/^\d+\.\d$/);
     });
 
     test("onglet Voie : niveau dans le temps, spectre et spectrogramme, voie non étalonnée (unité longue)", async ({ page }) => {

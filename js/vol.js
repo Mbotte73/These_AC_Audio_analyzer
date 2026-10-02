@@ -530,7 +530,7 @@ function dessinerAccelVol(canvas, xMin, xMax) {
   tracerCourbe(canvas, series, {
     titre,
     xlabel: "temps (min)", ylabel: "accélération (m/s²)",
-    xMin, xMax, ligneVerticaleX: tronquer,
+    xMin, xMax, ligneVerticaleX: tronquer, decimalesYAuto: true,
   });
 }
 
@@ -614,11 +614,7 @@ function dessinerAltitudeVol(canvas, xMin, xMax) {
   }
   ctx.restore();
 
-  ctx.textAlign = "left"; ctx.textBaseline = "alphabetic"; ctx.font = "12px sans-serif"; ctx.fillStyle = "#5b6270";
-  ctx.fillText("temps (min)", w-M.r-90, h-4);
-  ctx.save(); ctx.translate(12, M.t+10); ctx.rotate(-Math.PI/2);
-  ctx.fillText("altitude (m)", 0, 0);
-  ctx.restore();
+  dessinerTitresAxes(ctx, h, { gauche: M.l, droite: w-M.r, haut: M.t, bas: h-M.b }, "temps (min)", "altitude (m)");
 }
 
 /* ------------------------------------------------------- interaction zoom */
