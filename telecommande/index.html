@@ -145,7 +145,14 @@
     border: 1px solid #ccc;
     border-radius: 6px;
   }
-  .ligne-adresse input.nom { flex: 0 0 36%; font-weight: bold; }
+  .ligne-adresse input.nom { flex: 0 0 32%; font-weight: bold; }
+  .ligne-adresse input.port { flex: 0 0 4.2em; font-family: Consolas, Menlo, monospace; font-size: 0.88em; text-align: center; }
+  @media (max-width: 380px) {
+    .ligne-adresse { flex-wrap: wrap; }
+    .ligne-adresse input.nom { flex: 1 1 100%; }
+  }
+  .aide-reseau { font-size: 0.85em; color: var(--gris); margin: 4px 2px 10px 2px; line-height: 1.4; }
+  .aide-reseau.alerte { color: #7a4a00; background: #fff3e0; border: 1px solid var(--orange); border-radius: 6px; padding: 8px; }
   .ligne-adresse input.adresse { flex: 1; font-family: Consolas, Menlo, monospace; font-size: 0.88em; }
   .ligne-adresse input.invalide { border: 2px solid var(--rouge); background: #fff5f5; }
   .pastille {
@@ -177,6 +184,7 @@
   .ligne-boutons button.arreter { background: var(--rouge); }
   .ligne-boutons button.exporter { background: #37474f; }
   .ligne-boutons button.effacer { background: #8d6e00; }
+  .ligne-boutons button.voir { background: var(--bleu); }
   .ligne-boutons button.supprimer { flex: 0 0 auto; background: #999; padding: 10px 14px; }
   .bouton-ajout {
     width: 100%;
@@ -233,9 +241,9 @@
   <div id="liste-fichiers"></div>
 </div>
 
-<!-- Mode secours : exports a declencher un par un -->
+<!-- Methode par onglets : exports a declencher un par un -->
 <div id="panneau-secours" class="panneau important" style="display:none;">
-  <h2>[Secours] Exports a declencher</h2>
+  <h2>Exports a declencher (methode par onglets)</h2>
   <p>Un appui par fichier, en attendant a chaque fois son arrivee dans Telechargements.</p>
   <div id="liste-secours"></div>
 </div>
@@ -245,7 +253,7 @@
   <h2>Esclave(s) introuvable(s)</h2>
   <p id="texte-graine"></p>
   <div class="ligne-saisie">
-    <input id="saisie-graine" type="text" inputmode="decimal" autocomplete="off" placeholder="ex : 192.168.57.183:8080">
+    <input id="saisie-graine" type="text" inputmode="decimal" autocomplete="off" placeholder="ex : 192.168.57.183">
     <button id="bouton-graine" type="button">Rechercher</button>
   </div>
 </div>
@@ -265,6 +273,7 @@
 </div>
 <button id="bouton-effacer-tout" class="bouton-secondaire" type="button">Effacer tout (preparer le vol suivant)</button>
 
+<div id="aide-reseau" class="aide-reseau"></div>
 <div id="conteneur-appareils"></div>
 
 <div class="titre-journal">Journal</div>
@@ -273,20 +282,22 @@
 <details class="avance">
   <summary>Reglages avances</summary>
   <label>
-    <input type="checkbox" id="case-secours">
-    <span>Mode secours (ancienne methode par onglets). A n'utiliser que si la verification directe est impossible sur ce telephone : les commandes partent sans aucune confirmation de reception.</span>
+    <input type="checkbox" id="case-directe">
+    <span>Verification directe (experimentale, desactivee par defaut). Elle exige phyphox 1.2.1 ou plus sur les esclaves et Chrome 142 ou plus avec l'autorisation "reseau local" sur ce telephone. Si toutes les fiches restent "Injoignable", decochez : la methode par onglets est utilisee.</span>
   </label>
   <p id="texte-sous-reseaux" style="color:var(--gris);"></p>
 </details>
 
 <div class="aide">
-  Avant chaque vol : VERIFIER LES ESCLAVES. Chaque fiche doit etre verte ("Pret") avec "memoire vide". Si une adresse a change, la telecommande la retrouve seule ; si le reseau entier a change, elle demande l'adresse affichee par phyphox sur un seul esclave, puis retrouve les autres.
+  Avant chaque vol, sur chaque esclave : ouvrir l'experience phyphox, menu des 3 points, "Acces a distance", puis noter l'adresse affichee en bas de l'ecran phyphox. Ici, taper l'adresse COMPLETE du premier esclave (par exemple 192.168.57.183) ; pour les autres, le dernier nombre suffit. Le port est 8080 sauf indication contraire de phyphox. Le bouton Voir ouvre la page de l'esclave (courbe en direct) : il permet de controler que c'est le bon telephone.
   <br><br>
-  Au decollage : DEMARRER TOUT. Chaque fiche doit passer en bleu ("Mesure en cours") : c'est la confirmation, lue sur l'esclave lui-meme. Ensuite la telecommande surveille les esclaves toutes les 15 secondes (ecran du maitre allume, page ouverte) et sonne/vibre si l'un d'eux s'arrete ou ne repond plus.
+  Au decollage : DEMARRER TOUT. La methode par onglets n'a aucune confirmation de reception : controlez que chaque esclave mesure (bouton Voir, ou son ecran).
   <br><br>
-  A l'atterrissage : ARRETER TOUT. La telecommande arrete chaque esclave, verifie l'arret, recupere et controle les fichiers. Enregistrez ensuite chaque fichier avec son bouton orange. Puis "Effacer tout" : la telecommande refuse d'effacer sans alerte un esclave dont l'enregistrement n'a pas ete enregistre ici.
+  A l'atterrissage : ARRETER TOUT, puis un appui sur "Exporter" par esclave, en verifiant a chaque fois l'arrivee du fichier dans Telechargements. Ensuite seulement : "Effacer tout".
   <br><br>
   Sur les esclaves : phyphox doit rester a l'ecran pendant tout le vol (ne pas appuyer sur le bouton marche/arret, ne pas changer d'application, mode avion + Wi-Fi pour eviter les appels) : phyphox arrete la mesure et l'acces a distance des qu'il quitte l'ecran.
+  <br><br>
+  Verification directe (Reglages avances, experimentale) : si elle est activee et que Chrome l'autorise, VERIFIER LES ESCLAVES controle l'identite, l'etat et la memoire de chaque esclave, et la telecommande surveille la mesure en vol. Elle ne remplace pas la methode par onglets tant qu'elle n'a pas ete validee sur vos telephones.
 </div>
 
 <script>
@@ -294,7 +305,7 @@
 
 // A incrementer a chaque modification, pour verifier sur le telephone que la
 // mise a jour a bien ete recuperee.
-const VERSION_TELECOMMANDE = "2.0 (2 oct. 2026) : verification directe, adresses retrouvees, surveillance en vol";
+const VERSION_TELECOMMANDE = "2.1 (3 oct. 2026) : methode par onglets par defaut, saisie simple des adresses";
 document.getElementById("version-telecommande").textContent = "v" + VERSION_TELECOMMANDE;
 
 /* =========================================================================
@@ -328,7 +339,16 @@ document.getElementById("version-telecommande").textContent = "v" + VERSION_TELE
 
    5. Surveillance en vol toutes les 15 s, avec alarme sonore et vibration.
 
-   6. Mode secours : l'ancienne methode par onglets (v1.2) reste disponible.
+   6. Methode par onglets (v1.2) : c'est la methode PAR DEFAUT depuis la
+      v2.1. Constat sur un vrai telephone (3 oct. 2026) : la lecture directe
+      de la v2.0 ne joignait aucun esclave (cause non determinee : version de
+      Chrome, autorisation reseau local ou autre). Ouvrir un onglet vers
+      http://192.168.x.x ne depend d'aucune de ces conditions. La
+      verification directe reste disponible en option (Reglages avances).
+
+   7. Saisie des adresses (v2.1) : le port est un champ a part (le clavier
+      numerique d'Android n'a pas la touche "deux-points") et, une fois le
+      reseau connu, taper le seul dernier nombre suffit.
    ========================================================================= */
 
 const CLE_APPAREILS = "phyphox_appareils";       // meme cle qu'en v1.x (reprise des reglages)
@@ -398,16 +418,61 @@ function sousReseau(adresse) {
   return adresse.split(":")[0].split(".").slice(0, 3).join(".");
 }
 
+// Separe "192.168.43.23:8080" en { ip, port } pour les deux champs de saisie.
+function decouperAdresse(adresse) {
+  if (!adresse) return { ip: "", port: "" };
+  const i = adresse.lastIndexOf(":");
+  return i < 0 ? { ip: adresse, port: "" } : { ip: adresse.slice(0, i), port: adresse.slice(i + 1) };
+}
+
+// Debut commun (3 premiers nombres) du reseau en cours : le plus recemment
+// saisi, sinon celui de la derniere fiche qui a une adresse.
+function prefixeCourant() {
+  if (reglages.sousReseaux.length) return reglages.sousReseaux[0];
+  const avec = appareils.filter((a) => a.adresse);
+  return avec.length ? sousReseau(avec[avec.length - 1].adresse) : "";
+}
+
+// Saisie d'une adresse : adresse complete (192.168.43.23 ou 192.168.43.23:8080,
+// y compris collee depuis phyphox), ou seulement le dernier nombre (194) si
+// le reseau est deja connu. Le port vient du champ port (8080 si vide), sauf
+// s'il est donne dans l'adresse elle-meme.
+function interpreterSaisie(brutAdresse, brutPort) {
+  let a = String(brutAdresse || "").trim().replace(/\s+/g, "").replace(/,/g, ".");
+  a = a.replace(/^https?:\/\//i, "").replace(/\/.*$/, "");
+  if (a === "") return { vide: true };
+  if (/^\d{1,3}$/.test(a)) {
+    const prefixe = prefixeCourant();
+    if (!prefixe) return { erreur: "reseau inconnu : tapez d'abord l'adresse complete (par ex. 192.168.43.23)" };
+    a = prefixe + "." + a;
+  }
+  if (a.indexOf(":") < 0) {
+    // Pas de port dans l'adresse : celui du champ port (8080 si vide).
+    const port = String(brutPort || "").trim().replace(/\s+/g, "");
+    if (port !== "" && (!/^\d{1,5}$/.test(port) || Number(port) < 1 || Number(port) > 65535)) {
+      return { erreur: "port invalide \"" + port + "\" (un nombre de 1 a 65535 est attendu, par ex. 8080)", portInvalide: true };
+    }
+    a += ":" + (port === "" ? PORT_DEFAUT : port);
+  }
+  const n = normaliserAdresse(a);
+  return n ? { adresse: n } : { erreur: "adresse invalide \"" + brutAdresse + "\" (attendu par ex. 192.168.43.23)" };
+}
+
 // ---------------------------------------------------------------- stockage
+// "modeSecours" vrai = methode par onglets (nom interne conserve).
+// Depuis la v2.1 c'est la methode par defaut : les reglages d'une version
+// anterieure (sans "schema") ne sont pas repris pour ce choix.
+const SCHEMA_REGLAGES = 2;
 function chargerReglages() {
   try {
     const r = JSON.parse(localStorage.getItem(CLE_REGLAGES) || "{}");
     return {
-      modeSecours: r.modeSecours === true,
+      schema: SCHEMA_REGLAGES,
+      modeSecours: r.schema === SCHEMA_REGLAGES ? r.modeSecours === true : true,
       sousReseaux: Array.isArray(r.sousReseaux) ? r.sousReseaux.filter((x) => typeof x === "string") : [],
     };
   } catch (e) {
-    return { modeSecours: false, sousReseaux: [] };
+    return { schema: SCHEMA_REGLAGES, modeSecours: true, sousReseaux: [] };
   }
 }
 
@@ -462,6 +527,7 @@ function sauverAppareils() {
 }
 
 const reglages = chargerReglages();
+sauverReglages();
 let appareils = chargerAppareils();
 sauverAppareils(); // memorise tout de suite les adresses normalisees (reprise v1.x)
 // Etat courant de chaque appareil (non memorise) : { code, detail }
@@ -646,7 +712,7 @@ const TEXTES_ETAT = {
   injoignable: "Injoignable",
   alerte: "ALERTE",
   bloque: "Acces bloque par Chrome",
-  secours: "Mode secours (pas de verification)",
+  secours: "Methode par onglets (sans confirmation)",
   travail: "En cours...",
 };
 const CLASSE_ETAT = {
@@ -701,9 +767,13 @@ function majCarte(a) {
   if (etat.detail) infos.push(etat.detail);
   carte.querySelector(".infos-appareil").textContent = infos.join(" | ");
   const champ = carte.querySelector("input.adresse");
-  if (document.activeElement !== champ) {
-    champ.value = a.adresse;
+  const champPort = carte.querySelector("input.port");
+  if (document.activeElement !== champ && document.activeElement !== champPort) {
+    const p = decouperAdresse(a.adresse);
+    champ.value = p.ip;
+    if (a.adresse) champPort.value = p.port;
     champ.classList.remove("invalide");
+    champPort.classList.remove("invalide");
   }
 }
 
@@ -742,37 +812,59 @@ function dessiner() {
     champAdresse.className = "adresse";
     champAdresse.inputMode = "decimal";
     champAdresse.autocomplete = "off";
-    champAdresse.placeholder = "ex : 192.168.43.23:8080";
-    champAdresse.value = a.adresse;
-    champAdresse.addEventListener("change", () => {
-      if (operationEnCours) { champAdresse.value = a.adresse; return; }
-      const brut = champAdresse.value.trim();
-      if (brut === "") {
+    champAdresse.placeholder = "adresse (ex : 194)";
+    const champPort = document.createElement("input");
+    champPort.type = "text";
+    champPort.className = "port";
+    champPort.inputMode = "numeric";
+    champPort.autocomplete = "off";
+    champPort.maxLength = 5;
+    champPort.placeholder = "8080";
+    champPort.title = "Port affiche par phyphox (8080 en general)";
+    const parties = decouperAdresse(a.adresse);
+    champAdresse.value = parties.ip;
+    champPort.value = parties.port;
+    function validerSaisie() {
+      if (operationEnCours) { majCarte(a); return; }
+      const r = interpreterSaisie(champAdresse.value, champPort.value);
+      if (r.vide) {
         a.adresse = "";
         champAdresse.classList.remove("invalide");
+        champPort.classList.remove("invalide");
+      } else if (!r.adresse) {
+        (r.portInvalide ? champPort : champAdresse).classList.add("invalide");
+        journaliser(nomAffiche(a) + " : " + r.erreur + ". Non enregistree.");
+        return;
       } else {
-        const n = normaliserAdresse(brut);
-        if (!n) {
-          champAdresse.classList.add("invalide");
-          journaliser(nomAffiche(a) + " : adresse invalide \"" + brut + "\" (attendu par ex. 192.168.43.23:8080). Non enregistree.");
-          return;
-        }
         champAdresse.classList.remove("invalide");
-        if (n !== a.adresse) {
-          a.adresse = n;
+        champPort.classList.remove("invalide");
+        if (r.adresse !== a.adresse) {
+          a.adresse = r.adresse;
           // Adresse saisie a la main : l'identite sera relue a la verification.
           a.signature = "";
           a.modele = "";
           a.session = "";
-          memoriserSousReseau(sousReseau(n));
         }
-        champAdresse.value = n;
+        memoriserSousReseau(sousReseau(r.adresse));
       }
       sauverAppareils();
       etats.delete(a.id);
+      // Les champs montrent toujours l'adresse effectivement retenue, meme si
+      // l'un d'eux a encore le focus (touche Entree sans quitter le champ).
+      // Adresse effacee : le port deja saisi est conserve pour la suivante.
+      if (a.adresse) {
+        const retenue = decouperAdresse(a.adresse);
+        champAdresse.value = retenue.ip;
+        champPort.value = retenue.port;
+      } else {
+        champAdresse.value = "";
+      }
       majCarte(a);
-    });
-    ligne.append(champNom, champAdresse);
+      majAideReseau();
+    }
+    champAdresse.addEventListener("change", validerSaisie);
+    champPort.addEventListener("change", validerSaisie);
+    ligne.append(champNom, champAdresse, champPort);
 
     const pastille = document.createElement("span");
     pastille.className = "pastille";
@@ -790,13 +882,15 @@ function dessiner() {
     boutons2.className = "ligne-boutons";
     boutons2.append(
       creerBouton("Exporter", "exporter", () => actionIndividuelle(a, "export")),
-      creerBouton("Effacer", "effacer", () => actionIndividuelle(a, "clear"))
+      creerBouton("Effacer", "effacer", () => actionIndividuelle(a, "clear")),
+      creerBouton("Voir", "voir", () => ouvrirPageEsclave(a), true)
     );
     carte.append(ligne, pastille, infos, boutons1, boutons2);
     conteneur.appendChild(carte);
     majCarte(a);
   });
   conteneur.appendChild(creerBouton("+ Ajouter un appareil", "bouton-ajout", ajouterAppareil));
+  majAideReseau();
   document.getElementById("texte-sous-reseaux").textContent =
     "Sous-reseaux memorises : " + (sousReseauxConnus().map((p) => p + ".x").join(", ") || "aucun");
   if (operationEnCours) verrouiller(true);
@@ -833,6 +927,32 @@ function verrouiller(actif, libelle) {
 function memoriserSousReseau(prefixe) {
   reglages.sousReseaux = [prefixe].concat(reglages.sousReseaux.filter((p) => p !== prefixe)).slice(0, 4);
   sauverReglages();
+}
+
+// Ligne d'aide au-dessus des fiches : reseau en cours, et alerte si les
+// adresses des fiches ne sont pas toutes sur le meme reseau.
+function majAideReseau() {
+  const zone = document.getElementById("aide-reseau");
+  if (!zone) return;
+  const reseaux = Array.from(new Set(appareils.filter((a) => a.adresse).map((a) => sousReseau(a.adresse))));
+  zone.className = "aide-reseau" + (reseaux.length > 1 ? " alerte" : "");
+  if (reseaux.length > 1) {
+    zone.textContent = "Attention : les fiches ne sont pas toutes sur le meme reseau (" + reseaux.map((r) => r + ".x").join(" et ")
+      + "). Retapez les adresses qui ne correspondent pas au reseau actuel.";
+  } else if (prefixeCourant()) {
+    zone.textContent = "Reseau en cours : " + prefixeCourant() + ".x. Il suffit de taper le dernier nombre de l'adresse de chaque esclave. Si le reseau a change, tapez l'adresse complete du premier esclave.";
+  } else {
+    zone.textContent = "Tapez l'adresse complete du premier esclave (par ex. 192.168.43.23) ; pour les suivants, le dernier nombre suffira.";
+  }
+}
+
+// Ouvre la page de controle de l'esclave (courbe en direct) : sert a verifier
+// que c'est le bon telephone et qu'il mesure.
+function ouvrirPageEsclave(a) {
+  if (!a.adresse) { journaliser(nomAffiche(a) + " : pas d'adresse."); return; }
+  const fenetre = window.open("http://" + a.adresse + "/", "_blank");
+  journaliser("[onglets] page de " + nomAffiche(a) + " ouverte (" + a.adresse + ")");
+  if (!fenetre) journaliser("[onglets] Pop-up bloque : autorisez les pop-up pour cette page.");
 }
 
 function sousReseauxConnus() {
@@ -1083,7 +1203,7 @@ async function verifierPermission(adresseAmorce) {
       try { await lireStatut(amorce, DELAI_REQUETE_MS); return true; } catch (e) {}
     }
     afficherBandeau("erreur", "Chrome bloque l'acces au reseau local pour cette page.",
-      "Dans Chrome : icone a gauche de l'adresse (ou menu 3 points > Parametres > Parametres des sites) > Acces au reseau local / Appareils du reseau local > Autoriser pour mbotte73.github.io. En attendant, le mode secours (Reglages avances) reste possible.");
+      "Dans Chrome : icone a gauche de l'adresse (ou menu 3 points > Parametres > Parametres des sites) > Acces au reseau local / Appareils du reseau local > Autoriser pour mbotte73.github.io. Decochez la verification directe (Reglages avances) pour revenir a la methode par onglets.");
     appareils.forEach((a) => { if (a.adresse) definirEtat(a, "bloque"); });
     return false;
   }
@@ -1101,7 +1221,7 @@ async function verifierPermission(adresseAmorce) {
 async function verifierTout() {
   if (operationEnCours) return;
   if (reglages.modeSecours) {
-    afficherBandeau("alerte", "Mode secours actif : aucune verification possible.", "Decochez le mode secours (Reglages avances) pour utiliser la verification.");
+    afficherBandeau("alerte", "Methode par onglets active : aucune verification possible.", "Cochez la verification directe (Reglages avances) pour l'essayer.");
     return;
   }
   verrouiller(true, "Verification des esclaves...");
@@ -1213,7 +1333,7 @@ async function commander(a, cmd) {
     }
   }
   if (dernierType === "reseau" && await repondSansCors(a.adresse)) {
-    return { ok: false, message: "phyphox trop ancien sur cet esclave (mettre a jour en 1.2.1 ou plus), ou utiliser le mode secours" };
+    return { ok: false, message: "phyphox trop ancien sur cet esclave (mettre a jour en 1.2.1 ou plus), ou decocher la verification directe (methode par onglets)" };
   }
   return { ok: false, message: derniereErreur || "echec" };
 }
@@ -1668,39 +1788,40 @@ document.addEventListener("visibilitychange", () => {
   }
 });
 
-// ============================================================ MODE SECOURS
+// ======================================================= METHODE PAR ONGLETS
 // Methode de la v1.2 (onglets ouverts sur l'adresse de commande), conservee
-// sauf le format d'export. Aucune confirmation ni controle d'identite.
+// sauf le format d'export. Methode par defaut depuis la v2.1. Aucune
+// confirmation ni controle d'identite.
 function urlCommande(adresse, cmd) { return "http://" + adresse + "/control?cmd=" + cmd; }
 function urlExport(adresse) { return "http://" + adresse + "/export?format=" + FORMAT_EXPORT; }
 
 function secoursOuvrirUnOnglet(url, dureeAvantFermeture) {
   const fenetre = window.open(url, "_blank");
-  journaliser("[secours] " + url + " -> onglet ouvert");
+  journaliser("[onglets] " + url + " -> onglet ouvert");
   if (!fenetre) {
-    journaliser("[secours] Pop-up bloque : autorisez les pop-up pour cette page.");
+    journaliser("[onglets] Pop-up bloque : autorisez les pop-up pour cette page.");
     return;
   }
   setTimeout(() => { try { fenetre.close(); } catch (e) {} }, dureeAvantFermeture);
 }
 
 function secoursSequence(urls, libelle, onTermine) {
-  if (urls.length === 0) { journaliser("[secours] Aucune adresse configuree."); return; }
+  if (urls.length === 0) { journaliser("[onglets] Aucune adresse configuree."); return; }
   const fenetre = window.open(urls[0], "_blank");
-  if (!fenetre) { journaliser("[secours] Pop-up bloque : autorisez les pop-up pour cette page."); return; }
-  journaliser("[secours] " + urls[0] + " (1/" + urls.length + ")");
+  if (!fenetre) { journaliser("[onglets] Pop-up bloque : autorisez les pop-up pour cette page."); return; }
+  journaliser("[onglets] " + urls[0] + " (1/" + urls.length + ")");
   let i = 1;
   const DELAI = 2000;
   function suivante() {
     setTimeout(() => {
       if (i >= urls.length) {
         try { fenetre.close(); } catch (e) {}
-        journaliser("[secours] === " + libelle + " envoye (sans confirmation) ===");
+        journaliser("[onglets] === " + libelle + " envoye (sans confirmation) ===");
         if (onTermine) onTermine();
         return;
       }
-      try { fenetre.location.href = urls[i]; journaliser("[secours] " + urls[i] + " (" + (i + 1) + "/" + urls.length + ")"); }
-      catch (e) { journaliser("[secours] Erreur : " + e.message); }
+      try { fenetre.location.href = urls[i]; journaliser("[onglets] " + urls[i] + " (" + (i + 1) + "/" + urls.length + ")"); }
+      catch (e) { journaliser("[onglets] Erreur : " + e.message); }
       i++;
       suivante();
     }, DELAI);
@@ -1710,7 +1831,7 @@ function secoursSequence(urls, libelle, onTermine) {
 
 function secoursProposerExports() {
   const actifs = appareils.filter((a) => a.adresse);
-  afficherBandeau("alerte", "[secours] Exports : un appui par fichier (panneau orange), en attendant a chaque fois son arrivee dans Telechargements.");
+  afficherBandeau("alerte", "Exports : un appui par fichier (panneau orange), en attendant a chaque fois son arrivee dans Telechargements.");
   const liste = document.getElementById("liste-secours");
   liste.textContent = "";
   actifs.forEach((a) => {
@@ -1733,12 +1854,12 @@ function secoursToutFaire(cmd) {
 }
 
 function secoursEffacerTout() {
-  if (!window.confirm("[secours] Effacer les donnees de tous les esclaves ?\n\nAucune verification possible en mode secours : assurez-vous que TOUS les fichiers sont dans Telechargements.")) return;
+  if (!window.confirm("Effacer les donnees de tous les esclaves ?\n\nAucune verification possible avec la methode par onglets : assurez-vous que TOUS les fichiers sont dans Telechargements.")) return;
   secoursSequence(appareils.filter((a) => a.adresse).map((a) => urlCommande(a.adresse, "clear")), "Effacement");
 }
 
 function secoursUn(a, action) {
-  if (action === "clear" && !window.confirm("[secours] Effacer " + nomAffiche(a) + " ? Aucune verification possible.")) return;
+  if (action === "clear" && !window.confirm("Effacer " + nomAffiche(a) + " ? Aucune verification possible.")) return;
   if (action === "export") secoursOuvrirUnOnglet(urlExport(a.adresse), 8000);
   else secoursOuvrirUnOnglet(urlCommande(a.adresse, action), 2000);
 }
@@ -1750,24 +1871,45 @@ document.getElementById("bouton-arreter-tout").addEventListener("click", arreter
 document.getElementById("bouton-effacer-tout").addEventListener("click", effacerTout);
 document.getElementById("bouton-graine").addEventListener("click", rechercherDepuisGraine);
 document.getElementById("saisie-graine").addEventListener("keydown", (e) => { if (e.key === "Enter") rechercherDepuisGraine(); });
-const caseSecours = document.getElementById("case-secours");
-caseSecours.checked = reglages.modeSecours;
-caseSecours.addEventListener("change", () => {
-  if (operationEnCours) { caseSecours.checked = reglages.modeSecours; return; }
-  reglages.modeSecours = caseSecours.checked;
+const caseDirecte = document.getElementById("case-directe");
+caseDirecte.checked = !reglages.modeSecours;
+
+// Elements propres a la verification directe : visibles seulement dans ce mode.
+function appliquerMode() {
+  const direct = !reglages.modeSecours;
+  document.getElementById("bouton-verifier").style.display = direct ? "" : "none";
+  if (!direct) {
+    document.getElementById("panneau-graine").style.display = "none";
+    document.getElementById("panneau-attribution").style.display = "none";
+  }
+}
+
+function afficherBandeauMode() {
+  if (reglages.modeSecours) {
+    afficherBandeau("neutre", "Methode par onglets : les commandes partent sans confirmation de reception.",
+      "Apres DEMARRER TOUT, controlez chaque esclave avec son bouton Voir (courbe en direct) ou sur son ecran.");
+  } else {
+    afficherBandeau("neutre", "Appuyez sur VERIFIER LES ESCLAVES avant chaque vol.");
+  }
+}
+
+caseDirecte.addEventListener("change", () => {
+  if (operationEnCours) { caseDirecte.checked = !reglages.modeSecours; return; }
+  reglages.modeSecours = !caseDirecte.checked;
   sauverReglages();
-  journaliser(reglages.modeSecours ? "Mode secours ACTIVE (aucune confirmation)." : "Mode secours desactive.");
+  journaliser(reglages.modeSecours ? "Methode par onglets activee (aucune confirmation)." : "Verification directe activee (experimentale).");
   if (reglages.modeSecours) arreterSurveillance();
+  appliquerMode();
   dessiner();
-  if (reglages.modeSecours) afficherBandeau("alerte", "Mode secours actif : les commandes partent sans confirmation.");
-  else afficherBandeau("neutre", "Appuyez sur VERIFIER LES ESCLAVES avant chaque vol.");
+  afficherBandeauMode();
 });
 
+appliquerMode();
 dessiner();
 journaliser("Page prete (v" + VERSION_TELECOMMANDE.split(" ")[0] + "). " + appareils.length + " fiche(s).");
 messagesDeReprise.forEach(journaliser);
 if (reglages.modeSecours) {
-  afficherBandeau("alerte", "Mode secours actif : les commandes partent sans confirmation.");
+  afficherBandeauMode();
 } else if (appareils.some((a) => a.mesureAttendue)) {
   // Page rechargee pendant un vol : la surveillance reprend.
   afficherBandeau("alerte", "Mesure en cours d'apres le dernier demarrage : surveillance relancee.", "Touchez l'ecran une fois pour autoriser le son de l'alarme.");
