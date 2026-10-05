@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Test export</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0; padding: 16px; background: #f2f2f2; color: #111; }
+  h1 { font-size: 20px; margin: 0 0 8px; }
+  p { font-size: 14px; line-height: 1.4; margin: 6px 0; }
+  .champ { display: flex; gap: 8px; align-items: center; margin: 10px 0; }
+  .champ input { flex: 1; font-size: 18px; padding: 8px; min-width: 0; }
+  .champ select { font-size: 18px; padding: 8px; }
+  .var { background: #fff; border-radius: 10px; padding: 10px; margin: 10px 0; }
+  .var .nom { font-size: 14px; margin-bottom: 8px; }
+  .btn { display: block; box-sizing: border-box; width: 100%; text-align: center; background: #1565c0; color: #fff; border: 0; border-radius: 8px; padding: 14px; font-size: 18px; text-decoration: none; }
+  pre { background: #1e1e1e; color: #eee; padding: 10px; border-radius: 8px; font-size: 13px; white-space: pre-wrap; min-height: 60px; }
+</style>
+</head>
+<body>
+<h1>Test export phyphox</h1>
+<p>Une mesure doit etre faite et arretee dans phyphox (acces a distance actif, phyphox visible en ecran partage). Appuyez sur UNE variante, regardez si un fichier arrive dans Telechargements, notez le numero, puis passez a la suivante.</p>
+
+<div class="champ">
+  <input id="adr" value="192.168.1.18:8080" inputmode="decimal" aria-label="Adresse et port">
+  <select id="fmt" aria-label="Format"><option>1</option><option>2</option></select>
+</div>
+<div id="liste"></div>
+<pre id="journal">Journal</pre>
+
+<script>
+function url() {
+  return "http://" + document.getElementById("adr").value.trim() + "/export?format=" + document.getElementById("fmt").value;
+}
+function journal(texte) {
+  const j = document.getElementById("journal");
+  j.textContent += "\n" + new Date().toLocaleTimeString() + "  " + texte;
+}
+
+const variantes = [
+  { n: 1, nom: "window.open, fermeture apres 8 s (comme la remote v2.1)", f: () => {
+      const w = window.open(url(), "_blank");
+      journal("1 : fenetre " + (w ? "ouverte" : "NULL (bloquee)"));
+      if (w) setTimeout(() => { try { w.close(); } catch (e) {} }, 8000);
+  } },
+  { n: 2, nom: "window.open, sans fermeture automatique", f: () => {
+      const w = window.open(url(), "_blank");
+      journal("2 : fenetre " + (w ? "ouverte" : "NULL (bloquee)"));
+  } },
+  { n: 3, nom: "window.open avec noopener", f: () => {
+      window.open(url(), "_blank", "noopener");
+      journal("3 : appel fait (le retour est toujours null avec noopener, c'est normal)");
+  } },
+  { n: 4, nom: "lien normal, nouvel onglet", lien: "_blank", rel: "" },
+  { n: 5, nom: "lien nouvel onglet, noopener et noreferrer", lien: "_blank", rel: "noopener noreferrer" },
+  { n: 6, nom: "meme onglet (la page de test est quittee, revenez avec le bouton retour)", f: () => {
+      journal("6 : navigation dans le meme onglet");
+      location.href = url();
+  } },
+  { n: 7, nom: "cadre invisible dans la page", f: () => {
+      const c = document.createElement("iframe");
+      c.style.display = "none";
+      c.src = url();
+      document.body.appendChild(c);
+      journal("7 : cadre ajoute");
+  } },
+  { n: 8, nom: "ouvrir about:blank puis changer son adresse", f: () => {
+      const w = window.open("about:blank", "_blank");
+      if (!w) { journal("8 : fenetre NULL (bloquee)"); return; }
+      w.location.href = url();
+      journal("8 : adresse changee");
+  } },
+];
+
+const liste = document.getElementById("liste");
+const liens = [];
+variantes.forEach((v) => {
+  const bloc = document.createElement("div");
+  bloc.className = "var";
+  const nom = document.createElement("div");
+  nom.className = "nom";
+  nom.textContent = v.n + ". " + v.nom;
+  bloc.appendChild(nom);
+  if (v.lien) {
+    const a = document.createElement("a");
+    a.className = "btn";
+    a.target = v.lien;
+    if (v.rel) a.rel = v.rel;
+    a.textContent = "Variante " + v.n;
+    a.addEventListener("click", () => journal(v.n + " : lien touche"));
+    liens.push(a);
+    bloc.appendChild(a);
+  } else {
+    const b = document.createElement("button");
+    b.className = "btn";
+    b.textContent = "Variante " + v.n;
+    b.addEventListener("click", v.f);
+    bloc.appendChild(b);
+  }
+  liste.appendChild(bloc);
+});
+
+function majLiens() { liens.forEach((a) => { a.href = url(); }); }
+document.getElementById("adr").addEventListener("input", majLiens);
+document.getElementById("fmt").addEventListener("change", majLiens);
+majLiens();
+</script>
+</body>
+</html>
