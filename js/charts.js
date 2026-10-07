@@ -152,7 +152,20 @@ function tracerCourbe(canvas, series, opts) {
   ctx.beginPath();
   ctx.rect(M.l, M.t, w-M.l-M.r, h-M.t-M.b);
   ctx.clip();
-  for (const s of series) {
+  for (const sOrig of series) {
+    const s = decimerSerieParPixel(sOrig, px, w-M.l-M.r, logX, xMin, xMax);
+    if (s.colonnes) {
+      const { xc, ymn, ymx } = s.colonnes;
+      if (xc.length) {
+        ctx.fillStyle = s.couleur || "#0f4c5c"; ctx.strokeStyle = s.couleur || "#0f4c5c"; ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(px(xc[0]), py(ymx[0]));
+        for (let i = 1; i < xc.length; i++) ctx.lineTo(px(xc[i]), py(ymx[i]));
+        for (let i = xc.length-1; i >= 0; i--) ctx.lineTo(px(xc[i]), py(ymn[i]));
+        ctx.closePath(); ctx.fill(); ctx.stroke();
+      }
+      continue;
+    }
     ctx.strokeStyle = s.couleur || "#0f4c5c"; ctx.lineWidth = 1.5;
     ctx.setLineDash(s.tirets || []);
     ctx.beginPath();
@@ -214,6 +227,65 @@ function tracerCourbe(canvas, series, opts) {
     ctx.fillText(opts.ylabel, 0, 0);
     ctx.restore();
   }
+}
+
+/* Decimation d'affichage : une serie beaucoup plus dense que le nombre de
+   colonnes de pixels (ex. accelerometre 50 Hz sur 30 min = 90 000 points sur
+   ~900 px) est resumee par son minimum et son maximum dans chaque colonne,
+   dans l'ordre d'apparition. Le trace est visuellement identique (enveloppe
+   complete, aucun pic perdu) mais coute quelques centaines de segments au
+   lieu de dizaines de milliers : sans cela le dessin devient tres lent. */
+function decimerSerieParPixel(s, px, largeurPx, logX, xMin, xMax) {
+  if (logX || largeurPx < 2) return s;
+  // restreint d'abord aux points visibles (+1 de chaque cote pour raccorder
+  // aux bords) : en zoom serre, inutile de parcourir toute la serie.
+  let lo = 0, hi = s.xs.length;
+  while (lo < hi) { const m = (lo + hi) >> 1; if (s.xs[m] < xMin) lo = m + 1; else hi = m; }
+  const debut = Math.max(0, lo - 1);
+  lo = debut; hi = s.xs.length;
+  while (lo < hi) { const m = (lo + hi) >> 1; if (s.xs[m] <= xMax) lo = m + 1; else hi = m; }
+  const fin = Math.min(s.xs.length, lo + 1);
+  const n = fin - debut;
+  const veutEnveloppe = !!s.enveloppe && n > 2*largeurPx;
+  if (veutEnveloppe) {
+    // colonnes de pixels : min et max de chaque colonne, tracees ensuite comme
+    // une surface remplie (un seul polygone, tres peu couteux a rasteriser).
+    const xc = [], ymn = [], ymx = [];
+    let colE = null;
+    for (let i = debut; i < fin; i++) {
+      const y = s.ys[i];
+      if (!isFinite(y)) continue;
+      const c = Math.floor(px(s.xs[i]));
+      if (c !== colE) { colE = c; xc.push(s.xs[i]); ymn.push(y); ymx.push(y); }
+      else { const k = ymn.length-1; if (y < ymn[k]) ymn[k] = y; if (y > ymx[k]) ymx[k] = y; }
+    }
+    return { ...s, xs: [], ys: [], colonnes: { xc, ymn, ymx } };
+  }
+  if (n <= 4*largeurPx) {
+    if (debut === 0 && fin === s.xs.length) return s;
+    const cut = a => a.subarray ? a.subarray(debut, fin) : a.slice(debut, fin);
+    return { ...s, xs: cut(s.xs), ys: cut(s.ys) };
+  }
+  const xs = [], ys = [];
+  let col = null, iMin = -1, iMax = -1;
+  function vider() {
+    if (iMin < 0) return;
+    if (iMin === iMax) { xs.push(s.xs[iMin]); ys.push(s.ys[iMin]); }
+    else {
+      const a = Math.min(iMin, iMax), b = Math.max(iMin, iMax);
+      xs.push(s.xs[a], s.xs[b]); ys.push(s.ys[a], s.ys[b]);
+    }
+  }
+  for (let i = debut; i < fin; i++) {
+    const y = s.ys[i];
+    if (!isFinite(y)) { vider(); col = null; iMin = iMax = -1; xs.push(s.xs[i]); ys.push(NaN); continue; }
+    const c = Math.floor(px(s.xs[i]));
+    if (c !== col) { vider(); col = c; iMin = iMax = i; continue; }
+    if (y < s.ys[iMin]) iMin = i;
+    if (y > s.ys[iMax]) iMax = i;
+  }
+  vider();
+  return { ...s, xs, ys };
 }
 
 /* --------------------------------------------------------------- barres */

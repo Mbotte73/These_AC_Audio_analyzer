@@ -377,12 +377,48 @@ function volModeLectureActif() {
 // minutes) est <= limite. xs suppose croissant (serie temporelle) : on peut
 // s'arreter des le premier point au-dela, pas besoin de tout parcourir.
 function volTronquerSeries(xs, ys, limite) {
-  const xsT = [], ysT = [];
-  for (let i = 0; i < xs.length; i++) {
-    if (xs[i] > limite) break;
-    xsT.push(xs[i]); ysT.push(ys[i]);
+  // Recherche dichotomique du premier indice au-dela de la limite (xs
+  // croissant), puis vue sans copie pour les tableaux types : appele a
+  // chaque image de lecture sur des series de ~90 000 points.
+  let lo = 0, hi = xs.length;
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (xs[mid] > limite) hi = mid; else lo = mid + 1; }
+  const coupe = a => a.subarray ? a.subarray(0, lo) : a.slice(0, lo);
+  return { xs: coupe(xs), ys: coupe(ys) };
+}
+
+// Temps (en minutes) d'une serie phyphox, avec decalage : calcule une fois
+// et mis en cache tant que le decalage ne change pas (evite de recreer un
+// tableau de ~90 000 valeurs a chaque image de lecture).
+// Enveloppe min/max par blocs de 1 s (50 echantillons) : resume une serie
+// de ~90 000 points en ~3 600, calcule une fois. Utilisee quand la fenetre
+// affichee est large (plus de 3 min) : l'image est la meme qu'avec tous les
+// points (un pixel couvre plusieurs secondes), pour un cout constant par
+// image de lecture. En zoom serre, les points d'origine sont utilises.
+const VOL_BLOC_ENVELOPPE = 50;
+function volEnveloppeAccel(serie, decalage) {
+  if (serie._env && serie._envDecalage === decalage) return serie._env;
+  const xsFull = volXsMinutes(serie, decalage), ysFull = serie.magnitude;
+  const n = xsFull.length, B = VOL_BLOC_ENVELOPPE;
+  const xs = [], ys = [];
+  for (let d = 0; d < n; d += B) {
+    const f = Math.min(n, d + B);
+    let iMin = d, iMax = d;
+    for (let i = d + 1; i < f; i++) { if (ysFull[i] < ysFull[iMin]) iMin = i; if (ysFull[i] > ysFull[iMax]) iMax = i; }
+    const a = Math.min(iMin, iMax), b = Math.max(iMin, iMax);
+    xs.push(xsFull[a]); ys.push(ysFull[a]);
+    if (b !== a) { xs.push(xsFull[b]); ys.push(ysFull[b]); }
   }
-  return { xs: xsT, ys: ysT };
+  serie._env = { xs: Float64Array.from(xs), ys: Float64Array.from(ys) };
+  serie._envDecalage = decalage;
+  return serie._env;
+}
+
+function volXsMinutes(serie, decalage) {
+  if (serie._xsMin && serie._xsMinDecalage === decalage) return serie._xsMin;
+  const out = new Float64Array(serie.temps.length);
+  for (let i = 0; i < out.length; i++) out[i] = (serie.temps[i] + decalage) / 60;
+  serie._xsMin = out; serie._xsMinDecalage = decalage;
+  return out;
 }
 
 function formatMinSecVol(minutes) {
@@ -544,11 +580,14 @@ function dessinerAccelVol(canvas, xMin, xMax) {
   for (let i = 0; i < volAccel.length; i++) {
     if (!volAccel[i]) continue;
     const decalage = volDecalages.accel[i] || 0;
-    let xs = volAccel[i].temps.map(t => (t+decalage)/60), ys = volAccel[i].magnitude;
+    let xs, ys;
+    if ((xMax - xMin) > 3) ({ xs, ys } = volEnveloppeAccel(volAccel[i], decalage));
+    else { xs = volXsMinutes(volAccel[i], decalage); ys = volAccel[i].magnitude; }
     if (tronquer !== null) ({ xs, ys } = volTronquerSeries(xs, ys, tronquer));
     series.push({
       xs, ys,
       couleur: PALETTE_VOIES[i % PALETTE_VOIES.length], label: `Téléphone esclave ${i+1}`,
+      enveloppe: true, // dense (50 Hz) : trace en surface min/max par colonne de pixels
     });
   }
   const titre = libelleAccelVol(series.length);
@@ -944,10 +983,10 @@ function couleurKmlDepuisRgb(r, g, b, alpha) {
 }
 
 // Visite guidee Google Earth (gx:Tour) : la camera survole la trajectoire,
-// placee derriere et au-dessus de l'appareil, cap = direction du deplacement.
+// placee loin derriere et au-dessus de l'appareil, cap = direction du deplacement.
 // Dans Google Earth : dossier "Survol du vol" > bouton "Lire la visite".
-// FACTEUR_VISITE : vitesse de la visite par rapport au temps reel du vol.
-const FACTEUR_VISITE = 30;
+// DUREE_VISITE_S : duree de la visite (vitesse deduite de la duree du vol).
+const DUREE_VISITE_S = 25; // duree voulue de la visite, quelle que soit la duree du vol
 function construireVisiteKmlVol(pts, altitudeModeOk) {
   const n = pts.length;
   if (n < 2) return "";
@@ -956,7 +995,8 @@ function construireVisiteKmlVol(pts, altitudeModeOk) {
   const mLon = lat => 111320 * Math.cos(lat * Math.PI/180);
   const distM = (a, b) => Math.hypot((b.lon-a.lon)*mLon(a.lat), (b.lat-a.lat)*mLat);
   const cap = (a, b) => (Math.atan2((b.lon-a.lon)*mLon(a.lat), (b.lat-a.lat)*mLat) * 180/Math.PI + 360) % 360;
-  const pas = Math.max(1, Math.round(n / 300)); // environ 300 etapes de camera au maximum
+  const pas = Math.max(1, Math.round(n / 120)); // environ 120 etapes : mouvements amples, donc fluides
+  const facteur = Math.max(1e-6, (temps[n-1] - temps[0]) / (DUREE_VISITE_S - 2));
 
   // cap initial : direction du premier deplacement significatif (30 m)
   let capCourant = 0;
@@ -968,15 +1008,15 @@ function construireVisiteKmlVol(pts, altitudeModeOk) {
   if (indices[indices.length-1] !== n-1) indices.push(n-1);
   for (let k = 0; k < indices.length; k++) {
     const i = indices[k];
-    const a = pts[Math.max(0, i-4)], b = pts[Math.min(n-1, i+4)];
+    const a = pts[Math.max(0, i-12)], b = pts[Math.min(n-1, i+12)]; // cap lisse sur ~25 s de vol
     if (distM(a, b) > 8) capCourant = cap(a, b);
     const p = pts[i];
-    const recul = 400; // m derriere l'appareil
+    const recul = 1000; // m derriere l'appareil
     const rad = capCourant * Math.PI/180;
     const latC = p.lat - Math.cos(rad) * recul / mLat;
     const lonC = p.lon - Math.sin(rad) * recul / mLon(p.lat);
     const altP = altitudeModeOk && p.alt !== null && isFinite(p.alt) ? p.alt : 0;
-    const dureeS = k === 0 ? 3 : Math.max(0.2, (temps[i] - temps[dernierIndex]) / FACTEUR_VISITE);
+    const dureeS = k === 0 ? 2 : Math.max(0.05, (temps[i] - temps[dernierIndex]) / facteur);
     dernierIndex = i;
     etapes += `
         <gx:FlyTo>
@@ -984,14 +1024,14 @@ function construireVisiteKmlVol(pts, altitudeModeOk) {
           <gx:flyToMode>smooth</gx:flyToMode>
           <Camera>
             <longitude>${lonC.toFixed(7)}</longitude><latitude>${latC.toFixed(7)}</latitude>
-            <altitude>${(altP + 200).toFixed(1)}</altitude>
-            <heading>${capCourant.toFixed(1)}</heading><tilt>72</tilt>
+            <altitude>${(altP + 400).toFixed(1)}</altitude>
+            <heading>${capCourant.toFixed(1)}</heading><tilt>68</tilt>
             <altitudeMode>${altitudeModeOk ? "absolute" : "relativeToGround"}</altitudeMode>
           </Camera>
         </gx:FlyTo>`;
   }
   return `<gx:Tour>
-      <name>Survol du vol (x${FACTEUR_VISITE})</name>
+      <name>Survol du vol (${DUREE_VISITE_S} s)</name>
       <gx:Playlist>${etapes}
       </gx:Playlist>
     </gx:Tour>`;
