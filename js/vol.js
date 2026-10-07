@@ -48,7 +48,23 @@ let volControlesLecture = null;  // { btnPlay, slider, labelTemps } (references 
 
 // Couleur de la trace GPS (Tache B) : bascule altitude / niveau sonore
 // moyen, altitude par defaut pour ne rien changer a l'usage existant.
-let volCouleurTrace = "altitude";     // "altitude" | "son"
+let volCouleurTrace = "altitude";     // "altitude" | "vitesse" | "son"
+
+// Type de transport : le meme onglet sert a l'helicoptere et a l'ambulance.
+// Seuls changent le 1er graphique (altitude ou vitesse), les couleurs de
+// trace proposees, la vitesse maximale plausible (rejet des points GPS
+// aberrants : 150 m/s pour l'helicoptere, marge large car vitesse sol = vitesse
+// air + vent ; 60 m/s pour l'ambulance) et l'export KML (3D ou au sol).
+const VOL_MODES = {
+  helico:    { libelle: "Hélicoptère", nom: "Vol",    vitesseMaxMs: 150, couleurs: ["altitude", "vitesse", "son"], couleurDefaut: "altitude" },
+  ambulance: { libelle: "Ambulance",   nom: "Trajet", vitesseMaxMs: 60,  couleurs: ["vitesse", "son"],             couleurDefaut: "vitesse" },
+};
+const VOL_LIBELLES_COULEUR = { altitude: "Altitude", vitesse: "Vitesse", son: "Niveau sonore" };
+let volModeTransport = "helico";
+function volMode() { return VOL_MODES[volModeTransport]; }
+// Ecart sans position au-dela duquel on considere le signal GPS perdu
+// (tunnel, parking couvert) : pas de segment trace, pas de vitesse calculee.
+const VOL_GPS_TROU_S = 10;
 let volInclureVoiesFaibles = false;   // reintegrer dans la moyenne les voies signalees "niveau anormalement faible"
 let volControleCouleurTrace = null;   // { sel, optSon }
 let volLegendeCouleurTrace = null;    // { min, titre, max }
@@ -108,14 +124,16 @@ function volDomaineComplet() {
 function rendreOngletVol(conteneur) {
   conteneur.innerHTML = "";
   volAvertissementsNiveauxCache = calculerAvertissementsNiveaux(niveauxRapidesParVoie());
-  conteneur.appendChild(creerTitreImpression("Vol"));
+  conteneur.appendChild(creerTitreImpression(volMode().nom));
 
   const horodatage = extraireHorodatageTxt(txtTexte);
   const titre = document.createElement("h3");
   titre.textContent = horodatage
-    ? `Vol du ${formatDateVolFr(horodatage)}`
-    : "Vol — horodatage du WAV indisponible (fichier .TXT absent, ou horloge RTC du Teensy non synchronisee lors de l'enregistrement)";
+    ? `${volMode().nom} du ${formatDateVolFr(horodatage)}`
+    : `${volMode().nom} : horodatage du WAV indisponible (fichier .TXT absent, ou horloge RTC du Teensy non synchronisee lors de l'enregistrement)`;
   conteneur.appendChild(titre);
+
+  conteneur.appendChild(creerSelecteurModeVol());
 
   conteneur.appendChild(creerZoneDepotVol());
 
@@ -168,9 +186,10 @@ function rendreOngletVol(conteneur) {
     const d = volDomaineComplet();
     return { xMin: volZoomMin ?? d.min, xMax: volZoomMax ?? d.max };
   }
-  colGauche.appendChild(creerBlocGraphique("vol-altitude", "Altitude du vol",
-    (canvas) => { const { xMin, xMax } = domaineCourant(); dessinerAltitudeVol(canvas, xMin, xMax); },
-    () => `${baseNomFichier()}_vol_altitude.png`));
+  const ambulance = volModeTransport === "ambulance";
+  colGauche.appendChild(creerBlocGraphique("vol-altitude", ambulance ? "Vitesse" : "Altitude du vol",
+    (canvas) => { const { xMin, xMax } = domaineCourant(); dessinerPremierGraphiqueVol(canvas, xMin, xMax); },
+    () => `${baseNomFichier()}_${ambulance ? "trajet_vitesse" : "vol_altitude"}.png`));
   colGauche.appendChild(creerBlocGraphique("vol-son", `Niveau sonore, LAeq court terme (1 s), ${voiesAnalysees().length} voies`,
     (canvas) => { const { xMin, xMax } = domaineCourant(); dessinerSonVol(canvas, xMin, xMax); },
     () => `${baseNomFichier()}_vol_son.png`));
@@ -206,6 +225,157 @@ function rendreOngletVol(conteneur) {
   requestAnimationFrame(() => {
     initialiserCarteVol(mapDiv);
     mettreAJourCarteVol();
+  });
+}
+
+/* ------------------------------------------------------ type de transport */
+function creerSelecteurModeVol() {
+  const wrap = document.createElement("div");
+  wrap.className = "vol-mode no-print";
+  const label = document.createElement("label");
+  label.appendChild(document.createTextNode("Type de transport : "));
+  const sel = document.createElement("select");
+  sel.id = "vol-mode-transport";
+  for (const [cle, m] of Object.entries(VOL_MODES)) {
+    const opt = document.createElement("option");
+    opt.value = cle; opt.textContent = m.libelle;
+    sel.appendChild(opt);
+  }
+  sel.value = volModeTransport;
+  sel.addEventListener("change", () => changerModeTransportVol(sel.value));
+  label.appendChild(sel);
+  wrap.appendChild(label);
+  return wrap;
+}
+
+function changerModeTransportVol(mode) {
+  if (!VOL_MODES[mode] || mode === volModeTransport) return;
+  arreterLectureVol();
+  volModeTransport = mode;
+  if (!volMode().couleurs.includes(volCouleurTrace)) volCouleurTrace = volMode().couleurDefaut;
+  rafraichirOngletActif(); // reconstruit l'onglet (titres, graphique 1, couleurs, carte)
+}
+
+function dessinerPremierGraphiqueVol(canvas, xMin, xMax) {
+  if (volModeTransport === "ambulance") dessinerVitesseVol(canvas, xMin, xMax);
+  else dessinerAltitudeVol(canvas, xMin, xMax);
+}
+
+/* ------------------------------------------------- qualite GPS et vitesse */
+function distanceM(lat1, lon1, lat2, lon2) {
+  const mLon = 111320 * Math.cos(((lat1 + lat2) / 2) * Math.PI / 180);
+  return Math.hypot((lon2 - lon1) * mLon, (lat2 - lat1) * 111132);
+}
+
+// Points aberrants (sauts de position dus aux reflexions sur les batiments) :
+// un point est rejete si l'atteindre depuis le dernier point retenu impose
+// une vitesse impossible pour le mode (marge de 20 m pour le bruit normal).
+// Apres 3 rejets de suite, le point suivant est accepte : c'est alors un
+// vrai deplacement (ou un point de reference lui-meme errone).
+function volPointsGpsValides() {
+  if (!volGps) return null;
+  if (volGps._valides && volGps._validesCle === volModeTransport) return volGps._valides;
+  const n = volGps.lat.length, vmax = volMode().vitesseMaxMs;
+  const ok = new Array(n).fill(true);
+  let ref = 0, rejets = 0;
+  for (let i = 1; i < n; i++) {
+    const dt = Math.max(1e-3, volGps.temps[i] - volGps.temps[ref]);
+    const d = distanceM(volGps.lat[ref], volGps.lon[ref], volGps.lat[i], volGps.lon[i]);
+    if ((d - 20) / dt > vmax && rejets < 3) { ok[i] = false; rejets++; }
+    else { ref = i; rejets = 0; }
+  }
+  volGps._valides = ok; volGps._validesCle = volModeTransport;
+  return ok;
+}
+
+// Segments de trace entre points valides consecutifs. trou = true : plus de
+// VOL_GPS_TROU_S secondes sans position, dessine a part (pointilles).
+function volSegmentsGps() {
+  if (!volGps) return [];
+  if (volGps._segments && volGps._segmentsCle === volModeTransport) return volGps._segments;
+  const ok = volPointsGpsValides();
+  const segs = [];
+  let prec = -1;
+  for (let i = 0; i < ok.length; i++) {
+    if (!ok[i]) continue;
+    if (prec >= 0) segs.push({ a: prec, b: i, trou: volGps.temps[i] - volGps.temps[prec] > VOL_GPS_TROU_S });
+    prec = i;
+  }
+  volGps._segments = segs; volGps._segmentsCle = volModeTransport;
+  return segs;
+}
+
+// Vitesse (km/h) par point GPS, NaN si inconnue. Source preferee : la
+// vitesse Doppler fournie par le recepteur (colonne "Velocity" de phyphox),
+// sinon derivee des positions (moins precise en ville), filtree par une
+// mediane glissante sur 5 points. Valeurs impossibles pour le mode rejetees.
+function volVitessesKmh() {
+  if (!volGps) return null;
+  if (volGps._vitesses && volGps._vitessesCle === volModeTransport) return volGps._vitesses;
+  const n = volGps.lat.length, vmax = volMode().vitesseMaxMs;
+  const ok = volPointsGpsValides();
+  const out = new Array(n).fill(NaN);
+  const nbDoppler = volGps.vitesse ? volGps.vitesse.filter(v => v !== null).length : 0;
+  const doppler = nbDoppler >= 0.5 * n;
+  if (doppler) {
+    for (let i = 0; i < n; i++) {
+      const v = volGps.vitesse[i];
+      if (ok[i] && v !== null && v <= vmax) out[i] = v * 3.6;
+    }
+  } else {
+    const idx = [];
+    for (let i = 0; i < n; i++) if (ok[i]) idx.push(i);
+    const brut = new Array(n).fill(NaN);
+    for (let k = 0; k < idx.length; k++) {
+      const a = idx[Math.max(0, k-1)], b = idx[Math.min(idx.length-1, k+1)];
+      const dt = volGps.temps[b] - volGps.temps[a];
+      if (a === b || dt <= 0 || dt > 2*VOL_GPS_TROU_S) continue;
+      const v = distanceM(volGps.lat[a], volGps.lon[a], volGps.lat[b], volGps.lon[b]) / dt;
+      if (v <= vmax) brut[idx[k]] = v * 3.6;
+    }
+    for (let k = 0; k < idx.length; k++) {
+      const voisins = [];
+      for (let d = -2; d <= 2; d++) {
+        const q = k + d;
+        if (q < 0 || q >= idx.length) continue;
+        if (Math.abs(volGps.temps[idx[q]] - volGps.temps[idx[k]]) > VOL_GPS_TROU_S) continue;
+        if (isFinite(brut[idx[q]])) voisins.push(brut[idx[q]]);
+      }
+      if (voisins.length) { voisins.sort((x, y) => x - y); out[idx[k]] = voisins[voisins.length >> 1]; }
+    }
+  }
+  volGps._vitesses = out; volGps._vitessesCle = volModeTransport;
+  volGps._vitesseSource = doppler ? "Doppler GPS" : "dérivée des positions GPS";
+  return out;
+}
+
+function dessinerVitesseVol(canvas, xMin, xMax) {
+  if (!volGps) {
+    const { ctx, w, h } = preparerCanvas(canvas);
+    ctx.clearRect(0,0,w,h);
+    ctx.font = "13px sans-serif"; ctx.fillStyle = "#20242b"; ctx.fillText("Vitesse", 52, 16);
+    ctx.fillStyle = "#5b6270"; ctx.fillText("Déposez un export GPS phyphox ci-dessus pour afficher cette courbe.", 52, h/2);
+    return;
+  }
+  const v = volVitessesKmh();
+  const xs = [], ys = [];
+  let tPrec = null;
+  for (let i = 0; i < v.length; i++) {
+    if (!isFinite(v[i])) continue;
+    const t = volGps.temps[i];
+    if (tPrec !== null && t - tPrec > VOL_GPS_TROU_S) { xs.push((t + volDecalages.gps) / 60); ys.push(NaN); } // coupure (signal perdu)
+    xs.push((t + volDecalages.gps) / 60); ys.push(v[i]);
+    tPrec = t;
+  }
+  const tronquer = volModeLectureActif() ? volLecturePosition : null;
+  let serie = { xs, ys };
+  if (tronquer !== null) serie = volTronquerSeries(xs, ys, tronquer);
+  let vMax = 10;
+  for (const y of ys) if (isFinite(y) && y > vMax) vMax = y;
+  tracerCourbe(canvas, [{ xs: serie.xs, ys: serie.ys, couleur: PALETTE_VOIES[0], label: "Vitesse" }], {
+    titre: `Vitesse (${volGps._vitesseSource})`,
+    xlabel: "temps (min)", ylabel: "vitesse (km/h)",
+    xMin, xMax, yMin: 0, yMax: Math.ceil(vMax / 10) * 10, ligneVerticaleX: tronquer,
   });
 }
 
@@ -550,7 +720,7 @@ function redessinerVol() {
   const xMin = volZoomMin ?? domaine.min;
   const xMax = volZoomMax ?? domaine.max;
 
-  dessinerAltitudeVol(volCanvases.alt, xMin, xMax);
+  dessinerPremierGraphiqueVol(volCanvases.alt, xMin, xMax);
   dessinerSonVol(volCanvases.son, xMin, xMax);
   dessinerAccelVol(volCanvases.accel, xMin, xMax);
   mettreAJourCarteVol();
@@ -822,6 +992,8 @@ function volValeursCouleurTrace() {
   if (volCouleurTrace === "son") {
     valeurs = calculerNiveauxMoyensGps();
     if (!valeurs) return null;
+  } else if (volCouleurTrace === "vitesse") {
+    valeurs = volVitessesKmh();
   } else {
     valeurs = volGps.alt;
   }
@@ -838,9 +1010,12 @@ function creerControleCouleurTraceVol() {
   const label = document.createElement("label");
   label.appendChild(document.createTextNode("Couleur de la trace : "));
   const sel = document.createElement("select");
-  const optAlt = document.createElement("option"); optAlt.value = "altitude"; optAlt.textContent = "Altitude";
-  const optSon = document.createElement("option"); optSon.value = "son"; optSon.textContent = "Niveau sonore";
-  sel.appendChild(optAlt); sel.appendChild(optSon);
+  let optSon = null;
+  for (const cle of volMode().couleurs) {
+    const opt = document.createElement("option"); opt.value = cle; opt.textContent = VOL_LIBELLES_COULEUR[cle];
+    sel.appendChild(opt);
+    if (cle === "son") optSon = opt;
+  }
   sel.value = volCouleurTrace;
   sel.addEventListener("change", () => { volCouleurTrace = sel.value; redessinerVol(); });
   label.appendChild(sel);
@@ -870,7 +1045,7 @@ function mettreAJourControleCouleurTraceVol() {
   const dispo = volVoiesValides().length > 0;
   optSon.disabled = !dispo;
   optSon.title = dispo ? "" : "Aucune voie valide retenue pour calculer un niveau sonore moyen (toutes décochées, ou toutes signalées comme anormalement faibles).";
-  if (!dispo && volCouleurTrace === "son") { volCouleurTrace = "altitude"; sel.value = "altitude"; }
+  if (!dispo && volCouleurTrace === "son") { volCouleurTrace = volMode().couleurDefaut; sel.value = volCouleurTrace; }
 }
 
 function creerLegendeCouleurTraceVol() {
@@ -894,7 +1069,7 @@ function creerLegendeCouleurTraceVol() {
 function mettreAJourLegendeCouleurTraceVol() {
   if (!volLegendeCouleurTrace) return;
   const { min, titre, max } = volLegendeCouleurTrace;
-  titre.textContent = volCouleurTrace === "son" ? `Niveau sonore moyen (${uniteCourante()})` : "Altitude (m)";
+  titre.textContent = volCouleurTrace === "son" ? `Niveau sonore moyen (${uniteCourante()})` : volCouleurTrace === "vitesse" ? "Vitesse (km/h)" : "Altitude (m)";
   const couleurs = volValeursCouleurTrace();
   const chiffres = volCouleurTrace === "son" ? 1 : 0;
   if (couleurs && couleurs.ok) {
@@ -936,37 +1111,52 @@ function mettreAJourCarteVol() {
   if (!volGps || !volGps.lat.length) { volTrajectoireLayer.clearLayers(); volTraceSignature = null; return; }
 
   const pts = volGps.lat.map((lat,i) => ({ lat, lon: volGps.lon[i], t: (volGps.temps[i]+volDecalages.gps)/60 }));
+  const valides = volPointsGpsValides();
+  const segs = volSegmentsGps();
   const couleurs = volValeursCouleurTrace();
   const lecture = volModeLectureActif() ? volLecturePosition : null;
 
   // Mode lecture : la trace se construit au fur et a mesure (seuls les
   // segments deja parcourus sont dessines), au lieu d'afficher toute la trace.
   let nbSeg = 0;
-  for (let i = 0; i < pts.length-1; i++) { if (lecture !== null && pts[i+1].t > lecture) break; nbSeg++; }
+  for (const sg of segs) { if (lecture !== null && pts[sg.b].t > lecture) break; nbSeg++; }
 
-  const signature = [pts.length, volDecalages.gps, volCouleurTrace, couleurs && couleurs.ok ? couleurs.vMin+"/"+couleurs.vMax : "-", lecture === null ? "complet" : "lecture"].join("|");
+  const signature = [pts.length, volModeTransport, volDecalages.gps, volCouleurTrace, couleurs && couleurs.ok ? couleurs.vMin+"/"+couleurs.vMax : "-", lecture === null ? "complet" : "lecture"].join("|");
   if (signature !== volTraceSignature || nbSeg < volTraceNbSegments) {
     volTrajectoireLayer.clearLayers();
     volTraceNbSegments = 0;
     volTraceSignature = signature;
-    const dep = pts[0], arr = pts[pts.length-1];
+    const iDep = valides.indexOf(true), iArr = valides.lastIndexOf(true);
+    const dep = pts[Math.max(0, iDep)], arr = pts[Math.max(0, iArr)];
     L.circleMarker([dep.lat,dep.lon], { radius:7, color:"#1d6b3a", fillColor:"#2e8b57", fillOpacity:1, weight:2 }).bindTooltip("Départ").addTo(volTrajectoireLayer);
     if (lecture === null) L.circleMarker([arr.lat,arr.lon], { radius:7, color:"#8a2040", fillColor:"#c94b6a", fillOpacity:1, weight:2 }).bindTooltip("Arrivée").addTo(volTrajectoireLayer);
   }
-  for (let i = volTraceNbSegments; i < nbSeg; i++) {
-    const t = couleurs && couleurs.ok ? (((couleurs.valeurs[i]+couleurs.valeurs[i+1])/2)-couleurs.vMin)/(couleurs.vMax-couleurs.vMin) : 0.5;
-    L.polyline([[pts[i].lat,pts[i].lon],[pts[i+1].lat,pts[i+1].lon]], { color: viridisCss(t), weight: 4, opacity: .9 }).addTo(volTrajectoireLayer);
+  for (let k = volTraceNbSegments; k < nbSeg; k++) {
+    const { a, b, trou } = segs[k];
+    const ligne = [[pts[a].lat,pts[a].lon],[pts[b].lat,pts[b].lon]];
+    if (trou) {
+      L.polyline(ligne, { color: "#ffffff", weight: 2, opacity: .8, dashArray: "6 6" }).bindTooltip("Signal GPS perdu").addTo(volTrajectoireLayer);
+      continue;
+    }
+    let couleur = viridisCss(0.5);
+    if (couleurs && couleurs.ok) {
+      const va = couleurs.valeurs[a], vb = couleurs.valeurs[b];
+      const fa = va !== null && isFinite(va), fb = vb !== null && isFinite(vb);
+      const v = fa && fb ? (va+vb)/2 : fa ? va : fb ? vb : NaN;
+      couleur = isFinite(v) ? viridisCss((v-couleurs.vMin)/(couleurs.vMax-couleurs.vMin)) : "#9e9e9e";
+    }
+    L.polyline(ligne, { color: couleur, weight: 4, opacity: .9 }).addTo(volTrajectoireLayer);
   }
   volTraceNbSegments = nbSeg;
 
   if (!volMapInstance._volBoundsFites) {
-    volMapInstance.fitBounds(L.latLngBounds(pts.map(p => [p.lat,p.lon])), { padding: [20,20] });
+    volMapInstance.fitBounds(L.latLngBounds(pts.filter((p,i) => valides[i]).map(p => [p.lat,p.lon])), { padding: [20,20] });
     volMapInstance._volBoundsFites = true;
   }
 
   if (volSurvolMinutes !== null) {
     let idx = 0, ecartMin = Infinity;
-    for (let i = 0; i < pts.length; i++) { const e = Math.abs(pts[i].t-volSurvolMinutes); if (e<ecartMin) { ecartMin=e; idx=i; } }
+    for (let i = 0; i < pts.length; i++) { if (!valides[i]) continue; const e = Math.abs(pts[i].t-volSurvolMinutes); if (e<ecartMin) { ecartMin=e; idx=i; } }
     const p = pts[idx];
     if (!volCurseurMarker) volCurseurMarker = L.circleMarker([p.lat,p.lon], { radius:6, color:"#fff", fillColor:"#d62828", fillOpacity:1, weight:2 }).addTo(volMapInstance);
     else { volCurseurMarker.setLatLng([p.lat,p.lon]); if (!volMapInstance.hasLayer(volCurseurMarker)) volCurseurMarker.addTo(volMapInstance); }
@@ -990,19 +1180,36 @@ function couleurKmlDepuisRgb(r, g, b, alpha) {
 // decollage, sortie de ville lente, croisiere rapide, arrivee lente.
 // Dans Google Earth : selectionner "Survol du vol" puis bouton de lecture.
 const DUREE_VISITE_S = 25;
-const VISITE_PHASES = [ // [nom, duree de visite (s), distance camera (m)]
-  { nom: "approche", dureeS: 2, range: 500 },
-  { nom: "decollage", dureeS: 3, range: 500 },     // vue fixe
-  { nom: "sortie de ville", dureeS: 7, range: 1600 },
-  { nom: "croisiere", dureeS: 8, range: 7000 },
-  { nom: "arrivee", dureeS: 5, range: 1600 },
-];
-const VISITE_DISTANCE_VILLE_M = 6000;   // fin de la phase "sortie de ville"
-const VISITE_DISTANCE_ARRIVEE_M = 5000; // debut de la phase "arrivee"
+// Phases de la visite par type de transport : [nom, duree de visite (s),
+// distance camera (m)]. Distances de fin de "sortie de ville" et de debut
+// d'"arrivee" le long du trajet (plafonnees a 30 % du trajet total).
+const VISITE_PAR_MODE = {
+  helico: {
+    phases: [
+      { nom: "approche", dureeS: 2, range: 500 },
+      { nom: "decollage", dureeS: 3, range: 500 },     // vue fixe
+      { nom: "sortie de ville", dureeS: 7, range: 1600 },
+      { nom: "croisiere", dureeS: 8, range: 7000 },
+      { nom: "arrivee", dureeS: 5, range: 1600 },
+    ],
+    distanceVilleM: 6000, distanceArriveeM: 5000, tilt: 58, nom: "Survol du vol",
+  },
+  ambulance: {
+    phases: [
+      { nom: "approche", dureeS: 2, range: 300 },
+      { nom: "depart", dureeS: 3, range: 300 },        // vue fixe
+      { nom: "sortie de ville", dureeS: 7, range: 800 },
+      { nom: "route", dureeS: 8, range: 3000 },
+      { nom: "arrivee", dureeS: 5, range: 800 },
+    ],
+    distanceVilleM: 4000, distanceArriveeM: 4000, tilt: 55, nom: "Suivi du trajet",
+  },
+};
 const KML_EPOQUE_MS = Date.UTC(2000, 0, 1); // frise temporelle fictive (le vol a la duree reelle)
 
 function kmlHorodatage(tSecondes) { return new Date(KML_EPOQUE_MS + tSecondes*1000).toISOString(); }
 
+// pts : points GPS retenus, { lat, lon, alt, t } (t en s, temps du fichier).
 // Trace complete fine et translucide, toujours visible (sans horodatage) :
 // repere du trajet a venir, et filet de securite si la frise temporelle de
 // Google Earth masque les segments colores.
@@ -1020,7 +1227,7 @@ function construireTraceFondKmlVol(pts, altitudeModeOk) {
 
 // Point rouge qui se deplace avec la frise temporelle de Google Earth.
 function construireMarqueurKmlVol(pts, altitudeModeOk) {
-  const quand = pts.map((_, i) => `<when>${kmlHorodatage(volGps.temps[i] - volGps.temps[0])}</when>`).join("");
+  const quand = pts.map(p => `<when>${kmlHorodatage(p.t - pts[0].t)}</when>`).join("");
   const coord = pts.map(p => `<gx:coord>${p.lon} ${p.lat} ${altitudeModeOk && p.alt !== null && isFinite(p.alt) ? p.alt : 0}</gx:coord>`).join("");
   return `<Placemark>
       <name>Appareil</name>
@@ -1039,7 +1246,9 @@ function construireMarqueurKmlVol(pts, altitudeModeOk) {
 function construireVisiteKmlVol(pts, altitudeModeOk) {
   const n = pts.length;
   if (n < 2) return "";
-  const temps = volGps.temps;
+  const temps = pts.map(p => p.t);
+  const config = VISITE_PAR_MODE[volModeTransport];
+  const VISITE_PHASES = config.phases;
   const mLat = 111132;
   const mLon = lat => 111320 * Math.cos(lat * Math.PI/180);
   const distM = (a, b) => Math.hypot((b.lon-a.lon)*mLon(a.lat), (b.lat-a.lat)*mLat);
@@ -1052,8 +1261,8 @@ function construireVisiteKmlVol(pts, altitudeModeOk) {
   const total = cum[n-1];
   const premierIndex = pred => { for (let i = 0; i < n; i++) if (pred(i)) return i; return n-1; };
   const iDepart = premierIndex(i => distM(pts[0], pts[i]) > 30);                       // debut du deplacement
-  const iVille = Math.max(iDepart, premierIndex(i => cum[i] >= Math.min(VISITE_DISTANCE_VILLE_M, total*0.3)));
-  const iArrivee = Math.max(iVille, premierIndex(i => total - cum[i] <= Math.min(VISITE_DISTANCE_ARRIVEE_M, total*0.3)));
+  const iVille = Math.max(iDepart, premierIndex(i => cum[i] >= Math.min(config.distanceVilleM, total*0.3)));
+  const iArrivee = Math.max(iVille, premierIndex(i => total - cum[i] <= Math.min(config.distanceArriveeM, total*0.3)));
   const bornesVol = [temps[0], temps[0], temps[iDepart], temps[iVille], temps[iArrivee], temps[n-1]]; // debut de chaque phase + fin
 
   // vitesse relative (secondes de vol par seconde de visite), par phase,
@@ -1119,13 +1328,13 @@ function construireVisiteKmlVol(pts, altitudeModeOk) {
             <gx:TimeStamp><when>${kmlHorodatage(t - temps[0])}</when></gx:TimeStamp>
             <longitude>${cible.lon.toFixed(7)}</longitude><latitude>${cible.lat.toFixed(7)}</latitude>
             <altitude>${cible.alt.toFixed(1)}</altitude>
-            <heading>${capCam.toFixed(1)}</heading><tilt>58</tilt><range>${rangeLisse(jj).toFixed(0)}</range>
+            <heading>${capCam.toFixed(1)}</heading><tilt>${config.tilt}</tilt><range>${rangeLisse(jj).toFixed(0)}</range>
             <altitudeMode>${altitudeModeOk ? "absolute" : "relativeToGround"}</altitudeMode>
           </LookAt>
         </gx:FlyTo>`;
   }
   return `<gx:Tour>
-      <name>Survol du vol (${DUREE_VISITE_S} s)</name>
+      <name>${config.nom} (${DUREE_VISITE_S} s)</name>
       <gx:Playlist>${etapes}
       </gx:Playlist>
     </gx:Tour>`;
@@ -1133,31 +1342,42 @@ function construireVisiteKmlVol(pts, altitudeModeOk) {
 
 function exporterKmlVol() {
   if (!volGps || !volGps.lat.length) { alert("Aucune trajectoire GPS chargée à exporter."); return; }
-  const pts = volGps.lat.map((lat,i) => ({ lat, lon: volGps.lon[i], alt: volGps.alt[i] }));
+  const valides = volPointsGpsValides();
+  const tous = volGps.lat.map((lat,i) => ({ lat, lon: volGps.lon[i], alt: volGps.alt[i], t: volGps.temps[i] }));
+  const pts = tous.filter((p, i) => valides[i]); // sans les points GPS aberrants
+  if (pts.length < 2) { alert("Trajectoire GPS trop courte pour être exportée."); return; }
 
-  // altitudeMode du KML (rendu 3D dans Google Earth) : independant du mode de
-  // coloration choisi ci-dessous, se base uniquement sur la disponibilite
-  // reelle de l'altitude GPS.
+  // altitudeMode du KML : 3D (altitude GPS absolue) pour l'helicoptere si
+  // l'altitude est disponible ; toujours plaque au sol pour l'ambulance
+  // (l'altitude GPS au sol est trop bruitee pour etre affichee en 3D).
   let aMin = Infinity, aMax = -Infinity;
   for (const p of pts) if (p.alt !== null && isFinite(p.alt)) { if (p.alt<aMin) aMin=p.alt; if (p.alt>aMax) aMax=p.alt; }
-  const altitudeModeOk = isFinite(aMin) && isFinite(aMax) && aMax > aMin;
+  const altitudeModeOk = volModeTransport === "helico" && isFinite(aMin) && isFinite(aMax) && aMax > aMin;
 
   // Couleur de la trace exportee : suit le mode actuellement affiche a
-  // l'ecran (altitude ou niveau sonore), pas toujours l'altitude (Tache B.5).
+  // l'ecran (altitude, vitesse ou niveau sonore).
   const couleurs = volValeursCouleurTrace();
 
   let placemarks = "";
-  for (let i = 0; i < pts.length-1; i++) {
-    const t = couleurs && couleurs.ok ? (((couleurs.valeurs[i]+couleurs.valeurs[i+1])/2)-couleurs.vMin)/(couleurs.vMax-couleurs.vMin) : 0.5;
+  for (const { a: ia, b: ib, trou } of volSegmentsGps()) {
+    if (trou) continue; // signal GPS perdu : pas de segment
+    let t = 0.5;
+    if (couleurs && couleurs.ok) {
+      const va = couleurs.valeurs[ia], vb = couleurs.valeurs[ib];
+      const fa = va !== null && isFinite(va), fb = vb !== null && isFinite(vb);
+      const v = fa && fb ? (va+vb)/2 : fa ? va : fb ? vb : NaN;
+      if (isFinite(v)) t = (v-couleurs.vMin)/(couleurs.vMax-couleurs.vMin);
+    }
     const [r,g,b] = viridisRGB(t);
-    const alt1 = altitudeModeOk ? pts[i].alt : 0, alt2 = altitudeModeOk ? pts[i+1].alt : 0;
+    const pa = tous[ia], pb = tous[ib];
+    const alt1 = altitudeModeOk ? pa.alt : 0, alt2 = altitudeModeOk ? pb.alt : 0;
     placemarks += `
     <Placemark>
       <Style><LineStyle><color>${couleurKmlDepuisRgb(r,g,b)}</color><width>4</width></LineStyle></Style>
-      <TimeSpan><begin>${kmlHorodatage(volGps.temps[i+1] - volGps.temps[0])}</begin></TimeSpan>
+      <TimeSpan><begin>${kmlHorodatage(pb.t - pts[0].t)}</begin></TimeSpan>
       <LineString>
         <altitudeMode>${altitudeModeOk ? "absolute" : "clampToGround"}</altitudeMode>
-        <coordinates>${pts[i].lon},${pts[i].lat},${alt1} ${pts[i+1].lon},${pts[i+1].lat},${alt2}</coordinates>
+        <coordinates>${pa.lon},${pa.lat},${alt1} ${pb.lon},${pb.lat},${alt2}</coordinates>
       </LineString>
     </Placemark>`;
   }
@@ -1165,7 +1385,7 @@ function exporterKmlVol() {
   const kml = `<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2">
   <Document>
-    <name>Trajectoire du vol</name>
+    <name>Trajectoire (${volMode().libelle})</name>
     ${placemarks}
     ${construireTraceFondKmlVol(pts, altitudeModeOk)}
     ${construireMarqueurKmlVol(pts, altitudeModeOk)}
@@ -1176,6 +1396,6 @@ function exporterKmlVol() {
   const blob = new Blob([kml], { type: "application/vnd.google-earth.kml+xml" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = (wavData ? baseNomFichier() : "vol") + "_trajectoire.kml";
+  a.download = (wavData ? baseNomFichier() : volMode().nom.toLowerCase()) + "_trajectoire.kml";
   a.click();
 }

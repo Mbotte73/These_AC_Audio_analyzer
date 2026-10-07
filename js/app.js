@@ -489,7 +489,7 @@ function construireInterface() {
   for (const v of voiesAnalysees()) onglets.push({ id: `voie${v}`, label: nomVoie(v) });
   onglets.push({ id: "comparaison", label: "Comparaison" });
   onglets.push({ id: "capteur", label: "Paramètres du capteur" });
-  onglets.push({ id: "vol", label: "Vol" });
+  onglets.push({ id: "vol", label: "Trajet" });
 
   for (const o of onglets) {
     const btn = document.createElement("button");

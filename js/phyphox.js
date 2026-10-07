@@ -97,22 +97,27 @@ function parserGpsPhyphox(texte) {
   const iLat = trouverColonne(entetesNorm, ["latitude"]);
   const iLon = trouverColonne(entetesNorm, ["longitude"]);
   const iAlt = trouverColonne(entetesNorm, ["height", "altitude", "hauteur"], ["accuracy", "precision"]);
+  // Vitesse fournie par le recepteur GPS (effet Doppler, en m/s) : plus
+  // fiable que la derivee des positions, surtout en ville. Facultative.
+  const iVit = trouverColonne(entetesNorm, ["velocity", "vitesse", "speed"], ["accuracy", "precision"]);
 
   if (iT < 0 || iLat < 0 || iLon < 0) {
     throw new Error("Fichier non reconnu comme export GPS phyphox : colonnes temps/latitude/longitude introuvables. Verifiez qu'il s'agit bien d'un export du capteur \"Localisation\" (GPS).");
   }
 
-  const temps = [], lat = [], lon = [], alt = [];
+  const temps = [], lat = [], lon = [], alt = [], vitesse = [];
   for (const l of donnees) {
     if (!isFinite(l[iT]) || !isFinite(l[iLat]) || !isFinite(l[iLon])) continue;
     temps.push(l[iT]); lat.push(l[iLat]); lon.push(l[iLon]);
     alt.push(iAlt >= 0 && isFinite(l[iAlt]) ? l[iAlt] : null);
+    vitesse.push(iVit >= 0 && isFinite(l[iVit]) && l[iVit] >= 0 ? l[iVit] : null);
   }
   if (!temps.length) throw new Error("Export GPS phyphox reconnu, mais aucune ligne de donnees valide n'a ete trouvee.");
 
   return {
     temps, lat, lon, alt,
     altitudeDisponible: iAlt >= 0,
+    vitesse: iVit >= 0 ? vitesse : null, // m/s, null par point si absente
     instantAbsoluDebut: extraireInstantAbsoluDebut(entetesNorm, donnees),
   };
 }
