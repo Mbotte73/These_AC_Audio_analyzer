@@ -1003,6 +1003,21 @@ const KML_EPOQUE_MS = Date.UTC(2000, 0, 1); // frise temporelle fictive (le vol 
 
 function kmlHorodatage(tSecondes) { return new Date(KML_EPOQUE_MS + tSecondes*1000).toISOString(); }
 
+// Trace complete fine et translucide, toujours visible (sans horodatage) :
+// repere du trajet a venir, et filet de securite si la frise temporelle de
+// Google Earth masque les segments colores.
+function construireTraceFondKmlVol(pts, altitudeModeOk) {
+  const coord = pts.map(p => `${p.lon},${p.lat},${altitudeModeOk && p.alt !== null && isFinite(p.alt) ? p.alt : 0}`).join(" ");
+  return `<Placemark>
+      <name>Trace complete</name>
+      <Style><LineStyle><color>66ffffff</color><width>2</width></LineStyle></Style>
+      <LineString>
+        <altitudeMode>${altitudeModeOk ? "absolute" : "clampToGround"}</altitudeMode>
+        <coordinates>${coord}</coordinates>
+      </LineString>
+    </Placemark>`;
+}
+
 // Point rouge qui se deplace avec la frise temporelle de Google Earth.
 function construireMarqueurKmlVol(pts, altitudeModeOk) {
   const quand = pts.map((_, i) => `<when>${kmlHorodatage(volGps.temps[i] - volGps.temps[0])}</when>`).join("");
@@ -1139,7 +1154,7 @@ function exporterKmlVol() {
     placemarks += `
     <Placemark>
       <Style><LineStyle><color>${couleurKmlDepuisRgb(r,g,b)}</color><width>4</width></LineStyle></Style>
-      <TimeStamp><when>${kmlHorodatage(volGps.temps[i+1] - volGps.temps[0])}</when></TimeStamp>
+      <TimeSpan><begin>${kmlHorodatage(volGps.temps[i+1] - volGps.temps[0])}</begin></TimeSpan>
       <LineString>
         <altitudeMode>${altitudeModeOk ? "absolute" : "clampToGround"}</altitudeMode>
         <coordinates>${pts[i].lon},${pts[i].lat},${alt1} ${pts[i+1].lon},${pts[i+1].lat},${alt2}</coordinates>
@@ -1152,6 +1167,7 @@ function exporterKmlVol() {
   <Document>
     <name>Trajectoire du vol</name>
     ${placemarks}
+    ${construireTraceFondKmlVol(pts, altitudeModeOk)}
     ${construireMarqueurKmlVol(pts, altitudeModeOk)}
     ${construireVisiteKmlVol(pts, altitudeModeOk)}
   </Document>
