@@ -124,7 +124,9 @@ function tracerCourbe(canvas, series, opts) {
     const y = py(val);
     ctx.strokeStyle = "#eeece6"; ctx.beginPath(); ctx.moveTo(M.l,y); ctx.lineTo(w-M.r,y); ctx.stroke();
     ctx.fillStyle = "#5b6270";
-    ctx.fillText(val.toFixed(0), M.l-6, y);
+    // decimales adaptees au pas des graduations (evite "3 3 2 2 1 1" sur une echelle de 0 a 4 par pas de 0,5)
+    const pasY = ticksY.length > 1 ? Math.abs(ticksY[1]-ticksY[0]) : 1;
+    ctx.fillText(val.toFixed(pasY >= 1 ? 0 : Math.min(3, Math.ceil(-Math.log10(pasY)-1e-9))), M.l-6, y);
   }
 
   // graduations X
@@ -170,16 +172,20 @@ function tracerCourbe(canvas, series, opts) {
   }
   ctx.restore();
 
-  // ligne verticale optionnelle (temps courant de lecture, onglet Vol) :
-  // dessinee apres les courbes, avec le meme clip sur le cadre de tracé.
+  // marqueur optionnel du temps courant de lecture (onglet Vol) : point rouge
+  // pose sur le dernier point visible de chaque courbe (la courbe est tronquee
+  // au temps courant). Dessine apres les courbes, meme clip sur le cadre.
   if (opts.ligneVerticaleX !== undefined && opts.ligneVerticaleX !== null &&
       opts.ligneVerticaleX >= xMin && opts.ligneVerticaleX <= xMax) {
     ctx.save();
-    ctx.beginPath(); ctx.rect(M.l, M.t, w-M.l-M.r, h-M.t-M.b); ctx.clip();
-    const xv = px(opts.ligneVerticaleX);
-    ctx.strokeStyle = "#c94b6a"; ctx.lineWidth = 1.5; ctx.setLineDash([4,3]);
-    ctx.beginPath(); ctx.moveTo(xv, M.t); ctx.lineTo(xv, h-M.b); ctx.stroke();
-    ctx.setLineDash([]);
+    ctx.beginPath(); ctx.rect(M.l-6, M.t-6, w-M.l-M.r+12, h-M.t-M.b+12); ctx.clip();
+    for (const s of series) {
+      let k = s.xs.length - 1;
+      while (k >= 0 && !isFinite(s.ys[k])) k--;
+      if (k < 0 || s.xs[k] < xMin) continue;
+      ctx.fillStyle = "#d62828"; ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(px(s.xs[k]), py(s.ys[k]), 4.5, 0, 2*Math.PI); ctx.fill(); ctx.stroke();
+    }
     ctx.restore();
   }
 

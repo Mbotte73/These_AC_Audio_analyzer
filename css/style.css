@@ -157,6 +157,18 @@ canvas.chart.spectrogramme{ height:380px; }
 .vol-col-gauche{ display:flex; flex-direction:column; }
 .vol-col-droite{ display:flex; flex-direction:column; }
 .vol-map{ flex:1 1 auto; min-height:420px; border:1px solid var(--line); border-radius:8px; background:#e9e7e1; }
+/* Vue 16:9 (onglet Vol) : cadre fige au format 16:9 pour enregistrement d'ecran */
+.vol-scene.vol-16-9{ aspect-ratio:16/9; width:min(100%, calc((100vh - 1rem)*16/9)); max-height:calc(100vh - 1rem); margin:0 auto; background:#fff; padding:.5rem; box-sizing:border-box; display:flex; flex-direction:column; }
+.vol-scene.vol-16-9:fullscreen{ width:min(100vw, 100vh*16/9); height:min(100vh, 100vw*9/16); max-height:none; aspect-ratio:auto; margin:auto; }
+.vol-scene.vol-16-9 .vol-layout{ flex:1 1 0; min-height:0; grid-template-columns:1fr 1fr; gap:.6rem; }
+.vol-scene.vol-16-9 .vol-col-gauche, .vol-scene.vol-16-9 .vol-col-droite{ min-height:0; }
+.vol-scene.vol-16-9 .chart-wrap{ flex:1 1 0; min-height:0; margin:0 0 .3rem; }
+.vol-scene.vol-16-9 canvas.chart{ height:100%; }
+.vol-scene.vol-16-9 .chart-wrap > *:not(canvas){ display:none; }
+.vol-scene.vol-16-9 .vol-map{ min-height:0; }
+.vol-scene.vol-16-9 .vol-col-droite > button{ display:none; }
+.vol-scene.vol-16-9 .vol-lecture{ margin:0 0 .4rem; }
+
 @media (max-width: 900px){
   .vol-layout{ grid-template-columns:1fr; }
   .vol-map{ min-height:340px; }

@@ -132,11 +132,23 @@ function rendreOngletVol(conteneur) {
   barreOutils.appendChild(noteZoom);
   conteneur.appendChild(barreOutils);
 
-  conteneur.appendChild(creerBarreLectureVol());
+  // "Scene" : barre de lecture + graphiques + carte. C'est elle qui passe en
+  // vue 16:9 (plein ecran) pour un enregistrement d'ecran de l'animation.
+  const scene = document.createElement("div");
+  scene.className = "vol-scene";
+  conteneur.appendChild(scene);
+  const btn169 = document.createElement("button");
+  btn169.type = "button"; btn169.className = "secondaire"; btn169.style.marginLeft = ".8rem";
+  btn169.textContent = "Vue 16:9 plein écran";
+  btn169.title = "Affiche altitude, son, accélération et carte dans un cadre 16:9, pour enregistrer l'animation (enregistreur d'écran). Échap pour quitter.";
+  btn169.addEventListener("click", () => basculerVue169Vol(scene));
+  barreOutils.appendChild(btn169);
+
+  scene.appendChild(creerBarreLectureVol());
 
   const layout = document.createElement("div");
   layout.className = "vol-layout";
-  conteneur.appendChild(layout);
+  scene.appendChild(layout);
 
   const colGauche = document.createElement("div");
   colGauche.className = "vol-col-gauche";
@@ -195,6 +207,28 @@ function rendreOngletVol(conteneur) {
     initialiserCarteVol(mapDiv);
     mettreAJourCarteVol();
   });
+}
+
+/* ------------------------------------------------------------ vue 16:9 */
+function appliquerVue169Vol(scene, active) {
+  scene.classList.toggle("vol-16-9", active);
+  const rafraichir = () => { if (volMapInstance) volMapInstance.invalidateSize(); redessinerVol(); };
+  requestAnimationFrame(rafraichir);
+  setTimeout(rafraichir, 150);
+}
+
+function basculerVue169Vol(scene) {
+  const active = !scene.classList.contains("vol-16-9");
+  appliquerVue169Vol(scene, active);
+  if (active && scene.requestFullscreen) {
+    scene.requestFullscreen().catch(() => {}); // refus : le cadre 16:9 reste affiche dans la page
+    scene.addEventListener("fullscreenchange", function quitter() {
+      if (!document.fullscreenElement) { appliquerVue169Vol(scene, false); scene.removeEventListener("fullscreenchange", quitter); }
+      else planifierRedessinVol();
+    });
+  } else if (!active && document.fullscreenElement) {
+    document.exitFullscreen().catch(() => {});
+  }
 }
 
 /* ------------------------------------------------------------ depot phyphox */
@@ -568,49 +602,41 @@ function dessinerAltitudeVol(canvas, xMin, xMax) {
   function px(x) { return M.l + (x-xMin)/((xMax-xMin) || 1)*(w-M.l-M.r); }
   function py(y) { return h-M.b - (y-aMin)/(aMax-aMin)*(h-M.t-M.b); }
 
-  const N_BANDES = 24;
-  for (let k = 0; k < N_BANDES; k++) {
-    const yBas = aMin + k*(aMax-aMin)/N_BANDES;
-    const yHaut = aMin + (k+1)*(aMax-aMin)/N_BANDES;
-    ctx.fillStyle = viridisCss((k+0.5)/N_BANDES);
-    const yPixHaut = py(yHaut), yPixBas = py(yBas);
-    ctx.fillRect(M.l, yPixHaut, w-M.l-M.r, Math.max(1, yPixBas-yPixHaut));
-  }
-
   const ticksY = ticksLineaires(aMin, aMax, 6);
   ctx.textAlign = "right"; ctx.textBaseline = "middle";
   for (const val of ticksY) {
     const y = py(val);
-    ctx.strokeStyle = "rgba(255,255,255,.55)"; ctx.beginPath(); ctx.moveTo(M.l,y); ctx.lineTo(w-M.r,y); ctx.stroke();
-    ctx.fillStyle = "#20242b"; ctx.fillText(val.toFixed(0), M.l-6, y);
+    ctx.strokeStyle = "#eeece6"; ctx.beginPath(); ctx.moveTo(M.l,y); ctx.lineTo(w-M.r,y); ctx.stroke();
+    ctx.fillStyle = "#5b6270"; ctx.fillText(val.toFixed(0), M.l-6, y);
   }
   const ticksX = ticksLineaires(xMin, xMax, 8);
   ctx.textAlign = "center"; ctx.textBaseline = "top";
   for (const val of ticksX) {
     const x = px(val);
     if (x < M.l-1 || x > w-M.r+1) continue;
+    ctx.strokeStyle = "#f2f0eb"; ctx.beginPath(); ctx.moveTo(x,M.t); ctx.lineTo(x,h-M.b); ctx.stroke();
     ctx.strokeStyle = "#c8c4ba"; ctx.beginPath(); ctx.moveTo(x,h-M.b); ctx.lineTo(x,h-M.b+4); ctx.stroke();
     ctx.fillStyle = "#5b6270"; ctx.fillText(val.toFixed(1), x, h-M.b+6);
   }
   ctx.strokeStyle = "#20242b"; ctx.beginPath(); ctx.moveTo(M.l,M.t); ctx.lineTo(M.l,h-M.b); ctx.lineTo(w-M.r,h-M.b); ctx.stroke();
 
   ctx.save(); ctx.beginPath(); ctx.rect(M.l,M.t,w-M.l-M.r,h-M.t-M.b); ctx.clip();
-  ctx.strokeStyle = "#20242b"; ctx.lineWidth = 1.8; ctx.beginPath();
+  ctx.strokeStyle = PALETTE_VOIES[0]; ctx.lineWidth = 1.5; ctx.beginPath();
   let started = false;
+  let dernier = null;
   for (let i = 0; i < xs.length; i++) {
     if (tronquer !== null && xs[i] > tronquer) break; // xs croissant : rien au-dela a tracer
     if (xs[i] < xMin || xs[i] > xMax || ys[i] === null || !isFinite(ys[i])) { started = false; continue; }
     const x = px(xs[i]), y = py(ys[i]);
+    dernier = { x, y };
     if (!started) { ctx.moveTo(x,y); started = true; } else ctx.lineTo(x,y);
   }
   ctx.stroke();
 
-  // ligne verticale au temps courant de lecture (Tache A.3), meme clip.
-  if (tronquer !== null && tronquer >= xMin && tronquer <= xMax) {
-    const xv = px(tronquer);
-    ctx.strokeStyle = "#c94b6a"; ctx.lineWidth = 1.5; ctx.setLineDash([4,3]);
-    ctx.beginPath(); ctx.moveTo(xv, M.t); ctx.lineTo(xv, h-M.b); ctx.stroke();
-    ctx.setLineDash([]);
+  // point rouge au temps courant de lecture, sur le dernier point de la courbe.
+  if (tronquer !== null && dernier) {
+    ctx.fillStyle = "#d62828"; ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(dernier.x, dernier.y, 4.5, 0, 2*Math.PI); ctx.fill(); ctx.stroke();
   }
   ctx.restore();
 
@@ -850,6 +876,11 @@ function initialiserCarteVol(mapDiv) {
     maxZoom: 19,
     attribution: "Tiles &copy; Esri — Source : Esri, Maxar, Earthstar Geographics, GIS User Community",
   }).addTo(volMapInstance);
+  // Noms de villes, routes et frontieres (calque de reference Esri, meme
+  // fournisseur et memes conditions que l'imagerie satellite) par-dessus.
+  L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}", {
+    maxZoom: 19, attribution: "Labels &copy; Esri",
+  }).addTo(volMapInstance);
   volTrajectoireLayer = L.layerGroup().addTo(volMapInstance);
   volCurseurMarker = null;
   requestAnimationFrame(() => { if (volMapInstance) volMapInstance.invalidateSize(); });
@@ -863,14 +894,18 @@ function mettreAJourCarteVol() {
   const pts = volGps.lat.map((lat,i) => ({ lat, lon: volGps.lon[i], t: (volGps.temps[i]+volDecalages.gps)/60 }));
   const couleurs = volValeursCouleurTrace();
 
+  // Mode lecture : la trace se construit au fur et a mesure (seuls les
+  // segments deja parcourus sont dessines), au lieu d'afficher toute la trace.
+  const lecture = volModeLectureActif() ? volLecturePosition : null;
   for (let i = 0; i < pts.length-1; i++) {
+    if (lecture !== null && pts[i+1].t > lecture) break;
     const t = couleurs && couleurs.ok ? (((couleurs.valeurs[i]+couleurs.valeurs[i+1])/2)-couleurs.vMin)/(couleurs.vMax-couleurs.vMin) : 0.5;
     L.polyline([[pts[i].lat,pts[i].lon],[pts[i+1].lat,pts[i+1].lon]], { color: viridisCss(t), weight: 4, opacity: .9 }).addTo(volTrajectoireLayer);
   }
 
   const dep = pts[0], arr = pts[pts.length-1];
   L.circleMarker([dep.lat,dep.lon], { radius:7, color:"#1d6b3a", fillColor:"#2e8b57", fillOpacity:1, weight:2 }).bindTooltip("Départ").addTo(volTrajectoireLayer);
-  L.circleMarker([arr.lat,arr.lon], { radius:7, color:"#8a2040", fillColor:"#c94b6a", fillOpacity:1, weight:2 }).bindTooltip("Arrivée").addTo(volTrajectoireLayer);
+  if (lecture === null) L.circleMarker([arr.lat,arr.lon], { radius:7, color:"#8a2040", fillColor:"#c94b6a", fillOpacity:1, weight:2 }).bindTooltip("Arrivée").addTo(volTrajectoireLayer);
 
   if (!volMapInstance._volBoundsFites) {
     volMapInstance.fitBounds(L.latLngBounds(pts.map(p => [p.lat,p.lon])), { padding: [20,20] });
@@ -881,7 +916,7 @@ function mettreAJourCarteVol() {
     let idx = 0, ecartMin = Infinity;
     for (let i = 0; i < pts.length; i++) { const e = Math.abs(pts[i].t-volSurvolMinutes); if (e<ecartMin) { ecartMin=e; idx=i; } }
     const p = pts[idx];
-    if (!volCurseurMarker) volCurseurMarker = L.circleMarker([p.lat,p.lon], { radius:6, color:"#20242b", fillColor:"#ffd54a", fillOpacity:1, weight:2 }).addTo(volMapInstance);
+    if (!volCurseurMarker) volCurseurMarker = L.circleMarker([p.lat,p.lon], { radius:6, color:"#fff", fillColor:"#d62828", fillOpacity:1, weight:2 }).addTo(volMapInstance);
     else { volCurseurMarker.setLatLng([p.lat,p.lon]); if (!volMapInstance.hasLayer(volCurseurMarker)) volCurseurMarker.addTo(volMapInstance); }
   } else if (volCurseurMarker) {
     volMapInstance.removeLayer(volCurseurMarker);
