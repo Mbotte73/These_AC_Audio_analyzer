@@ -209,7 +209,8 @@ function tracerCourbe(canvas, series, opts) {
   ctx.fillStyle = "#5b6270";
   ctx.fillText(opts.xlabel || "", w-M.r-90, h-4);
   if (opts.ylabel) {
-    ctx.save(); ctx.translate(12, M.t+10); ctx.rotate(-Math.PI/2);
+    // centre le long de l'axe (un titre ancre en haut deborde du cadre des graphiques courts)
+    ctx.save(); ctx.translate(12, M.t + (h-M.t-M.b)/2); ctx.rotate(-Math.PI/2); ctx.textAlign = "center";
     ctx.fillText(opts.ylabel, 0, 0);
     ctx.restore();
   }

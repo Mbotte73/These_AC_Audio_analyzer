@@ -452,7 +452,7 @@ function creerBarreLectureVol() {
   labelVitesse.className = "vol-lecture-vitesse";
   labelVitesse.appendChild(document.createTextNode("Vitesse "));
   const selVitesse = document.createElement("select");
-  for (const v of [1, 10, 60, 300]) {
+  for (const v of [1, 10, 60, 150, 200, 300]) {
     const opt = document.createElement("option");
     opt.value = String(v); opt.textContent = "x" + v;
     if (v === volLectureVitesse) opt.selected = true;
@@ -616,7 +616,7 @@ function dessinerAltitudeVol(canvas, xMin, xMax) {
     if (x < M.l-1 || x > w-M.r+1) continue;
     ctx.strokeStyle = "#f2f0eb"; ctx.beginPath(); ctx.moveTo(x,M.t); ctx.lineTo(x,h-M.b); ctx.stroke();
     ctx.strokeStyle = "#c8c4ba"; ctx.beginPath(); ctx.moveTo(x,h-M.b); ctx.lineTo(x,h-M.b+4); ctx.stroke();
-    ctx.fillStyle = "#5b6270"; ctx.fillText(val.toFixed(1), x, h-M.b+6);
+    ctx.fillStyle = "#5b6270"; ctx.fillText(val.toFixed(val<10 && val!==Math.round(val) ? 1 : 0), x, h-M.b+6);
   }
   ctx.strokeStyle = "#20242b"; ctx.beginPath(); ctx.moveTo(M.l,M.t); ctx.lineTo(M.l,h-M.b); ctx.lineTo(w-M.r,h-M.b); ctx.stroke();
 
@@ -642,7 +642,7 @@ function dessinerAltitudeVol(canvas, xMin, xMax) {
 
   ctx.textAlign = "left"; ctx.textBaseline = "alphabetic"; ctx.font = "12px sans-serif"; ctx.fillStyle = "#5b6270";
   ctx.fillText("temps (min)", w-M.r-90, h-4);
-  ctx.save(); ctx.translate(12, M.t+10); ctx.rotate(-Math.PI/2);
+  ctx.save(); ctx.translate(12, M.t + (h-M.t-M.b)/2); ctx.rotate(-Math.PI/2); ctx.textAlign = "center";
   ctx.fillText("altitude (m)", 0, 0);
   ctx.restore();
 }
@@ -883,29 +883,42 @@ function initialiserCarteVol(mapDiv) {
   }).addTo(volMapInstance);
   volTrajectoireLayer = L.layerGroup().addTo(volMapInstance);
   volCurseurMarker = null;
+  volTraceSignature = null; volTraceNbSegments = 0; // nouvelle couche : tout redessiner
   requestAnimationFrame(() => { if (volMapInstance) volMapInstance.invalidateSize(); });
 }
 
+// Etat du dessin de la trace : en lecture, on ajoute seulement les nouveaux
+// segments a chaque image (au lieu de recreer toute la trace, couteux a 60
+// images/s), sauf si ce qui determine l'apparence a change.
+let volTraceSignature = null, volTraceNbSegments = 0;
+
 function mettreAJourCarteVol() {
   if (!volMapInstance) return;
-  volTrajectoireLayer.clearLayers();
-  if (!volGps || !volGps.lat.length) return;
+  if (!volGps || !volGps.lat.length) { volTrajectoireLayer.clearLayers(); volTraceSignature = null; return; }
 
   const pts = volGps.lat.map((lat,i) => ({ lat, lon: volGps.lon[i], t: (volGps.temps[i]+volDecalages.gps)/60 }));
   const couleurs = volValeursCouleurTrace();
+  const lecture = volModeLectureActif() ? volLecturePosition : null;
 
   // Mode lecture : la trace se construit au fur et a mesure (seuls les
   // segments deja parcourus sont dessines), au lieu d'afficher toute la trace.
-  const lecture = volModeLectureActif() ? volLecturePosition : null;
-  for (let i = 0; i < pts.length-1; i++) {
-    if (lecture !== null && pts[i+1].t > lecture) break;
+  let nbSeg = 0;
+  for (let i = 0; i < pts.length-1; i++) { if (lecture !== null && pts[i+1].t > lecture) break; nbSeg++; }
+
+  const signature = [pts.length, volDecalages.gps, volCouleurTrace, couleurs && couleurs.ok ? couleurs.vMin+"/"+couleurs.vMax : "-", lecture === null ? "complet" : "lecture"].join("|");
+  if (signature !== volTraceSignature || nbSeg < volTraceNbSegments) {
+    volTrajectoireLayer.clearLayers();
+    volTraceNbSegments = 0;
+    volTraceSignature = signature;
+    const dep = pts[0], arr = pts[pts.length-1];
+    L.circleMarker([dep.lat,dep.lon], { radius:7, color:"#1d6b3a", fillColor:"#2e8b57", fillOpacity:1, weight:2 }).bindTooltip("Départ").addTo(volTrajectoireLayer);
+    if (lecture === null) L.circleMarker([arr.lat,arr.lon], { radius:7, color:"#8a2040", fillColor:"#c94b6a", fillOpacity:1, weight:2 }).bindTooltip("Arrivée").addTo(volTrajectoireLayer);
+  }
+  for (let i = volTraceNbSegments; i < nbSeg; i++) {
     const t = couleurs && couleurs.ok ? (((couleurs.valeurs[i]+couleurs.valeurs[i+1])/2)-couleurs.vMin)/(couleurs.vMax-couleurs.vMin) : 0.5;
     L.polyline([[pts[i].lat,pts[i].lon],[pts[i+1].lat,pts[i+1].lon]], { color: viridisCss(t), weight: 4, opacity: .9 }).addTo(volTrajectoireLayer);
   }
-
-  const dep = pts[0], arr = pts[pts.length-1];
-  L.circleMarker([dep.lat,dep.lon], { radius:7, color:"#1d6b3a", fillColor:"#2e8b57", fillOpacity:1, weight:2 }).bindTooltip("Départ").addTo(volTrajectoireLayer);
-  if (lecture === null) L.circleMarker([arr.lat,arr.lon], { radius:7, color:"#8a2040", fillColor:"#c94b6a", fillOpacity:1, weight:2 }).bindTooltip("Arrivée").addTo(volTrajectoireLayer);
+  volTraceNbSegments = nbSeg;
 
   if (!volMapInstance._volBoundsFites) {
     volMapInstance.fitBounds(L.latLngBounds(pts.map(p => [p.lat,p.lon])), { padding: [20,20] });
@@ -928,6 +941,60 @@ function couleurKmlDepuisRgb(r, g, b, alpha) {
   alpha = alpha === undefined ? 255 : alpha;
   const h = n => n.toString(16).padStart(2, "0");
   return h(alpha) + h(b) + h(g) + h(r); // KML : aabbggrr
+}
+
+// Visite guidee Google Earth (gx:Tour) : la camera survole la trajectoire,
+// placee derriere et au-dessus de l'appareil, cap = direction du deplacement.
+// Dans Google Earth : dossier "Survol du vol" > bouton "Lire la visite".
+// FACTEUR_VISITE : vitesse de la visite par rapport au temps reel du vol.
+const FACTEUR_VISITE = 30;
+function construireVisiteKmlVol(pts, altitudeModeOk) {
+  const n = pts.length;
+  if (n < 2) return "";
+  const temps = volGps.temps;
+  const mLat = 111132;
+  const mLon = lat => 111320 * Math.cos(lat * Math.PI/180);
+  const distM = (a, b) => Math.hypot((b.lon-a.lon)*mLon(a.lat), (b.lat-a.lat)*mLat);
+  const cap = (a, b) => (Math.atan2((b.lon-a.lon)*mLon(a.lat), (b.lat-a.lat)*mLat) * 180/Math.PI + 360) % 360;
+  const pas = Math.max(1, Math.round(n / 300)); // environ 300 etapes de camera au maximum
+
+  // cap initial : direction du premier deplacement significatif (30 m)
+  let capCourant = 0;
+  for (let i = 1; i < n; i++) if (distM(pts[0], pts[i]) > 30) { capCourant = cap(pts[0], pts[i]); break; }
+
+  let etapes = "", dernierIndex = 0;
+  const indices = [];
+  for (let i = 0; i < n; i += pas) indices.push(i);
+  if (indices[indices.length-1] !== n-1) indices.push(n-1);
+  for (let k = 0; k < indices.length; k++) {
+    const i = indices[k];
+    const a = pts[Math.max(0, i-4)], b = pts[Math.min(n-1, i+4)];
+    if (distM(a, b) > 8) capCourant = cap(a, b);
+    const p = pts[i];
+    const recul = 400; // m derriere l'appareil
+    const rad = capCourant * Math.PI/180;
+    const latC = p.lat - Math.cos(rad) * recul / mLat;
+    const lonC = p.lon - Math.sin(rad) * recul / mLon(p.lat);
+    const altP = altitudeModeOk && p.alt !== null && isFinite(p.alt) ? p.alt : 0;
+    const dureeS = k === 0 ? 3 : Math.max(0.2, (temps[i] - temps[dernierIndex]) / FACTEUR_VISITE);
+    dernierIndex = i;
+    etapes += `
+        <gx:FlyTo>
+          <gx:duration>${dureeS.toFixed(2)}</gx:duration>
+          <gx:flyToMode>smooth</gx:flyToMode>
+          <Camera>
+            <longitude>${lonC.toFixed(7)}</longitude><latitude>${latC.toFixed(7)}</latitude>
+            <altitude>${(altP + 200).toFixed(1)}</altitude>
+            <heading>${capCourant.toFixed(1)}</heading><tilt>72</tilt>
+            <altitudeMode>${altitudeModeOk ? "absolute" : "relativeToGround"}</altitudeMode>
+          </Camera>
+        </gx:FlyTo>`;
+  }
+  return `<gx:Tour>
+      <name>Survol du vol (x${FACTEUR_VISITE})</name>
+      <gx:Playlist>${etapes}
+      </gx:Playlist>
+    </gx:Tour>`;
 }
 
 function exporterKmlVol() {
@@ -961,10 +1028,11 @@ function exporterKmlVol() {
   }
 
   const kml = `<?xml version="1.0" encoding="UTF-8"?>
-<kml xmlns="http://www.opengis.net/kml/2.2">
+<kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2">
   <Document>
     <name>Trajectoire du vol</name>
     ${placemarks}
+    ${construireVisiteKmlVol(pts, altitudeModeOk)}
   </Document>
 </kml>`;
 
