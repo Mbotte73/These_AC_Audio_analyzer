@@ -982,11 +982,45 @@ function couleurKmlDepuisRgb(r, g, b, alpha) {
   return h(alpha) + h(b) + h(g) + h(r); // KML : aabbggrr
 }
 
-// Visite guidee Google Earth (gx:Tour) : la camera survole la trajectoire,
-// placee loin derriere et au-dessus de l'appareil, cap = direction du deplacement.
-// Dans Google Earth : dossier "Survol du vol" > bouton "Lire la visite".
-// DUREE_VISITE_S : duree de la visite (vitesse deduite de la duree du vol).
-const DUREE_VISITE_S = 25; // duree voulue de la visite, quelle que soit la duree du vol
+// ---------------------------------------------------------------- visite KML
+// Visite guidee Google Earth (gx:Tour) de 25 s qui SUIT l'appareil (camera
+// d'observation a distance, pas la vue du pilote) et fait apparaitre la trace
+// au fur et a mesure (chaque segment porte un horodatage ; la camera pilote la
+// frise temporelle). Vitesse variable : 2 s d'approche, 3 s de vue fixe au
+// decollage, sortie de ville lente, croisiere rapide, arrivee lente.
+// Dans Google Earth : selectionner "Survol du vol" puis bouton de lecture.
+const DUREE_VISITE_S = 25;
+const VISITE_PHASES = [ // [nom, duree de visite (s), distance camera (m)]
+  { nom: "approche", dureeS: 2, range: 500 },
+  { nom: "decollage", dureeS: 3, range: 500 },     // vue fixe
+  { nom: "sortie de ville", dureeS: 7, range: 1600 },
+  { nom: "croisiere", dureeS: 8, range: 7000 },
+  { nom: "arrivee", dureeS: 5, range: 1600 },
+];
+const VISITE_DISTANCE_VILLE_M = 6000;   // fin de la phase "sortie de ville"
+const VISITE_DISTANCE_ARRIVEE_M = 5000; // debut de la phase "arrivee"
+const KML_EPOQUE_MS = Date.UTC(2000, 0, 1); // frise temporelle fictive (le vol a la duree reelle)
+
+function kmlHorodatage(tSecondes) { return new Date(KML_EPOQUE_MS + tSecondes*1000).toISOString(); }
+
+// Point rouge qui se deplace avec la frise temporelle de Google Earth.
+function construireMarqueurKmlVol(pts, altitudeModeOk) {
+  const quand = pts.map((_, i) => `<when>${kmlHorodatage(volGps.temps[i] - volGps.temps[0])}</when>`).join("");
+  const coord = pts.map(p => `<gx:coord>${p.lon} ${p.lat} ${altitudeModeOk && p.alt !== null && isFinite(p.alt) ? p.alt : 0}</gx:coord>`).join("");
+  return `<Placemark>
+      <name>Appareil</name>
+      <Style>
+        <IconStyle><color>ff2828d6</color><scale>1.1</scale><Icon><href>http://maps.google.com/mapfiles/kml/shapes/placemark_circle.png</href></Icon></IconStyle>
+        <LineStyle><width>0</width></LineStyle>
+      </Style>
+      <gx:Track>
+        <altitudeMode>${altitudeModeOk ? "absolute" : "clampToGround"}</altitudeMode>
+        ${quand}
+        ${coord}
+      </gx:Track>
+    </Placemark>`;
+}
+
 function construireVisiteKmlVol(pts, altitudeModeOk) {
   const n = pts.length;
   if (n < 2) return "";
@@ -994,40 +1028,85 @@ function construireVisiteKmlVol(pts, altitudeModeOk) {
   const mLat = 111132;
   const mLon = lat => 111320 * Math.cos(lat * Math.PI/180);
   const distM = (a, b) => Math.hypot((b.lon-a.lon)*mLon(a.lat), (b.lat-a.lat)*mLat);
-  const cap = (a, b) => (Math.atan2((b.lon-a.lon)*mLon(a.lat), (b.lat-a.lat)*mLat) * 180/Math.PI + 360) % 360;
-  const pas = Math.max(1, Math.round(n / 120)); // environ 120 etapes : mouvements amples, donc fluides
-  const facteur = Math.max(1e-6, (temps[n-1] - temps[0]) / (DUREE_VISITE_S - 2));
+  const capDeg = (a, b) => (Math.atan2((b.lon-a.lon)*mLon(a.lat), (b.lat-a.lat)*mLat) * 180/Math.PI + 360) % 360;
+  const altDe = p => (altitudeModeOk && p.alt !== null && isFinite(p.alt)) ? p.alt : 0;
 
-  // cap initial : direction du premier deplacement significatif (30 m)
-  let capCourant = 0;
-  for (let i = 1; i < n; i++) if (distM(pts[0], pts[i]) > 30) { capCourant = cap(pts[0], pts[i]); break; }
+  // abscisse curviligne (m) et instants charniere du vol
+  const cum = [0];
+  for (let i = 1; i < n; i++) cum.push(cum[i-1] + distM(pts[i-1], pts[i]));
+  const total = cum[n-1];
+  const premierIndex = pred => { for (let i = 0; i < n; i++) if (pred(i)) return i; return n-1; };
+  const iDepart = premierIndex(i => distM(pts[0], pts[i]) > 30);                       // debut du deplacement
+  const iVille = Math.max(iDepart, premierIndex(i => cum[i] >= Math.min(VISITE_DISTANCE_VILLE_M, total*0.3)));
+  const iArrivee = Math.max(iVille, premierIndex(i => total - cum[i] <= Math.min(VISITE_DISTANCE_ARRIVEE_M, total*0.3)));
+  const bornesVol = [temps[0], temps[0], temps[iDepart], temps[iVille], temps[iArrivee], temps[n-1]]; // debut de chaque phase + fin
 
-  let etapes = "", dernierIndex = 0;
-  const indices = [];
-  for (let i = 0; i < n; i += pas) indices.push(i);
-  if (indices[indices.length-1] !== n-1) indices.push(n-1);
-  for (let k = 0; k < indices.length; k++) {
-    const i = indices[k];
-    const a = pts[Math.max(0, i-12)], b = pts[Math.min(n-1, i+12)]; // cap lisse sur ~25 s de vol
-    if (distM(a, b) > 8) capCourant = cap(a, b);
-    const p = pts[i];
-    const recul = 1000; // m derriere l'appareil
-    const rad = capCourant * Math.PI/180;
-    const latC = p.lat - Math.cos(rad) * recul / mLat;
-    const lonC = p.lon - Math.sin(rad) * recul / mLon(p.lat);
-    const altP = altitudeModeOk && p.alt !== null && isFinite(p.alt) ? p.alt : 0;
-    const dureeS = k === 0 ? 2 : Math.max(0.05, (temps[i] - temps[dernierIndex]) / facteur);
-    dernierIndex = i;
+  // vitesse relative (secondes de vol par seconde de visite), par phase,
+  // puis lissee pour eviter les a-coups aux changements de phase
+  const PAS = 0.1;
+  const nPas = Math.round(DUREE_VISITE_S / PAS);
+  const vitesse = new Array(nPas).fill(0);
+  const phaseDe = new Array(nPas).fill(0);
+  let debutPhase = 0;
+  for (let k = 0; k < VISITE_PHASES.length; k++) {
+    const dureeVol = bornesVol[k+1] - bornesVol[k];
+    const fin = debutPhase + VISITE_PHASES[k].dureeS;
+    for (let j = 0; j < nPas; j++) {
+      const tau = j * PAS;
+      if (tau >= debutPhase && tau < fin) { vitesse[j] = k === 0 ? 0 : dureeVol / VISITE_PHASES[k].dureeS; phaseDe[j] = k; }
+    }
+    debutPhase = fin;
+  }
+  vitesse[nPas-1] = vitesse[nPas-2];
+  const lisse = vitesse.map((_, j) => {
+    let somme = 0, nb = 0;
+    for (let d = -12; d <= 12; d++) { const q = j + d; if (q >= 0 && q < nPas) { somme += vitesse[q]; nb++; } }
+    return somme / nb;
+  });
+  const f = [temps[0]]; // temps de vol atteint a chaque pas de visite
+  for (let j = 1; j <= nPas; j++) f.push(f[j-1] + lisse[Math.min(j-1, nPas-1)] * PAS);
+  const echelle = (temps[n-1] - temps[0]) / ((f[nPas] - f[0]) || 1);
+  for (let j = 0; j <= nPas; j++) f[j] = temps[0] + (f[j] - temps[0]) * echelle; // finit exactement a la fin du vol
+
+  // position / altitude interpolees au temps de vol t
+  function etatA(t) {
+    let lo = 0, hi = n-1;
+    while (hi - lo > 1) { const m = (lo + hi) >> 1; if (temps[m] <= t) lo = m; else hi = m; }
+    const u = temps[hi] > temps[lo] ? Math.min(1, Math.max(0, (t - temps[lo]) / (temps[hi] - temps[lo]))) : 0;
+    return { lat: pts[lo].lat + u*(pts[hi].lat-pts[lo].lat), lon: pts[lo].lon + u*(pts[hi].lon-pts[lo].lon), alt: altDe(pts[lo]) + u*(altDe(pts[hi])-altDe(pts[lo])) };
+  }
+
+  // distance de la camera : lissee entre phases (smoothstep sur 1,5 s)
+  const rangePhase = j => VISITE_PHASES[phaseDe[j]].range;
+  const rangeLisse = j => { let s = 0, nb = 0; for (let d = -15; d <= 15; d++) { const q = Math.min(nPas-1, Math.max(0, j+d)); s += rangePhase(q); nb++; } return s / nb; };
+
+  const capVol = (iDepart < n-1) ? capDeg(pts[0], pts[iDepart]) : 0;
+  const posDepart = { lat: pts[0].lat, lon: pts[0].lon, alt: altDe(pts[0]) + 20 };
+  let capCam = capVol;
+  let etapes = "";
+  const PAS_ETAPE = 2; // une etape de camera tous les 0,2 s de visite
+  for (let j = 0; j <= nPas; j += PAS_ETAPE) {
+    const jj = Math.min(j, nPas-1);
+    const t = f[j];
+    const fixe = phaseDe[jj] <= 1; // approche + decollage : vue fixe sur la plateforme
+    const cible = fixe ? posDepart : etatA(t);
+    // cap de la camera : direction de deplacement sur +/- 40 s de vol, filtre
+    const A = etatA(t - 40), B = etatA(t + 40);
+    let capVise = fixe ? capVol : (distM(A, B) > 30 ? capDeg(A, B) : capCam);
+    let ecart = ((capVise - capCam + 540) % 360) - 180;
+    capCam = (capCam + (fixe ? ecart : ecart * 0.25) + 360) % 360;
+    const dureeS = j === 0 ? 0.1 : PAS_ETAPE * PAS;
     etapes += `
         <gx:FlyTo>
           <gx:duration>${dureeS.toFixed(2)}</gx:duration>
-          <gx:flyToMode>smooth</gx:flyToMode>
-          <Camera>
-            <longitude>${lonC.toFixed(7)}</longitude><latitude>${latC.toFixed(7)}</latitude>
-            <altitude>${(altP + 400).toFixed(1)}</altitude>
-            <heading>${capCourant.toFixed(1)}</heading><tilt>68</tilt>
+          <gx:flyToMode>${j === 0 ? "bounce" : "smooth"}</gx:flyToMode>
+          <LookAt>
+            <gx:TimeStamp><when>${kmlHorodatage(t - temps[0])}</when></gx:TimeStamp>
+            <longitude>${cible.lon.toFixed(7)}</longitude><latitude>${cible.lat.toFixed(7)}</latitude>
+            <altitude>${cible.alt.toFixed(1)}</altitude>
+            <heading>${capCam.toFixed(1)}</heading><tilt>58</tilt><range>${rangeLisse(jj).toFixed(0)}</range>
             <altitudeMode>${altitudeModeOk ? "absolute" : "relativeToGround"}</altitudeMode>
-          </Camera>
+          </LookAt>
         </gx:FlyTo>`;
   }
   return `<gx:Tour>
@@ -1060,6 +1139,7 @@ function exporterKmlVol() {
     placemarks += `
     <Placemark>
       <Style><LineStyle><color>${couleurKmlDepuisRgb(r,g,b)}</color><width>4</width></LineStyle></Style>
+      <TimeStamp><when>${kmlHorodatage(volGps.temps[i+1] - volGps.temps[0])}</when></TimeStamp>
       <LineString>
         <altitudeMode>${altitudeModeOk ? "absolute" : "clampToGround"}</altitudeMode>
         <coordinates>${pts[i].lon},${pts[i].lat},${alt1} ${pts[i+1].lon},${pts[i+1].lat},${alt2}</coordinates>
@@ -1072,6 +1152,7 @@ function exporterKmlVol() {
   <Document>
     <name>Trajectoire du vol</name>
     ${placemarks}
+    ${construireMarqueurKmlVol(pts, altitudeModeOk)}
     ${construireVisiteKmlVol(pts, altitudeModeOk)}
   </Document>
 </kml>`;
