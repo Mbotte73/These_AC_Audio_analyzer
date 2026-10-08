@@ -20,7 +20,7 @@
 */
 
 // A incrementer a chaque modification de la page.
-const CACHE_NAME = "telecommande-phyphox-2.1";
+const CACHE_NAME = "telecommande-phyphox-2.2";
 
 const FICHIERS_A_METTRE_EN_CACHE = [
   "./",

@@ -124,6 +124,11 @@
     white-space: nowrap;
   }
   .fichier button.fait { background: #9e9e9e; }
+  .bouton-exporter-tout {
+    display: block; width: 100%; margin: 4px 0 10px; padding: 14px;
+    font-size: 1.05em; font-weight: bold; color: white; background: #e65100;
+    border: none; border-radius: 8px;
+  }
 
   .carte-appareil {
     background: white;
@@ -244,7 +249,8 @@
 <!-- Methode par onglets : exports a declencher un par un -->
 <div id="panneau-secours" class="panneau important" style="display:none;">
   <h2>Exports a declencher (methode par onglets)</h2>
-  <p>Un appui par fichier, en attendant a chaque fois son arrivee dans Telechargements.</p>
+  <p>EXPORTER TOUT lance tous les exports d'un seul appui. Verifiez ensuite dans Telechargements qu'il y a un fichier par esclave. S'il en manque un : son bouton Exporter ci-dessous.</p>
+  <button id="bouton-exporter-tout-panneau" class="bouton-exporter-tout" type="button">EXPORTER TOUT</button>
   <div id="liste-secours"></div>
 </div>
 
@@ -271,6 +277,7 @@
   <button id="bouton-demarrer-tout" class="bouton-global demarrer" type="button">DEMARRER TOUT</button>
   <button id="bouton-arreter-tout" class="bouton-global arreter" type="button">ARRETER TOUT</button>
 </div>
+<button id="bouton-exporter-tout" class="bouton-secondaire" type="button">Exporter tout</button>
 <button id="bouton-effacer-tout" class="bouton-secondaire" type="button">Effacer tout (preparer le vol suivant)</button>
 
 <div id="aide-reseau" class="aide-reseau"></div>
@@ -293,7 +300,7 @@
   <br><br>
   Au decollage : DEMARRER TOUT. La methode par onglets n'a aucune confirmation de reception : controlez que chaque esclave mesure (bouton Voir, ou son ecran).
   <br><br>
-  A l'atterrissage : ARRETER TOUT, puis un appui sur "Exporter" par esclave, en verifiant a chaque fois l'arrivee du fichier dans Telechargements. Ensuite seulement : "Effacer tout".
+  A l'atterrissage : ARRETER TOUT, puis EXPORTER TOUT (ou un appui sur "Exporter" par esclave). Verifiez dans Telechargements qu'il y a un fichier par esclave. Ensuite seulement : "Effacer tout".
   <br><br>
   Sur les esclaves : phyphox doit rester a l'ecran pendant tout le vol (ne pas appuyer sur le bouton marche/arret, ne pas changer d'application, mode avion + Wi-Fi pour eviter les appels) : phyphox arrete la mesure et l'acces a distance des qu'il quitte l'ecran.
   <br><br>
@@ -305,7 +312,7 @@
 
 // A incrementer a chaque modification, pour verifier sur le telephone que la
 // mise a jour a bien ete recuperee.
-const VERSION_TELECOMMANDE = "2.1 (3 oct. 2026) : methode par onglets par defaut, saisie simple des adresses";
+const VERSION_TELECOMMANDE = "2.2 (8 oct. 2026) : bouton Exporter tout (methode par onglets)";
 document.getElementById("version-telecommande").textContent = "v" + VERSION_TELECOMMANDE;
 
 /* =========================================================================
@@ -1829,9 +1836,9 @@ function secoursSequence(urls, libelle, onTermine) {
   suivante();
 }
 
-function secoursProposerExports() {
+function secoursProposerExports(garderBandeau) {
   const actifs = appareils.filter((a) => a.adresse);
-  afficherBandeau("alerte", "Exports : un appui par fichier (panneau orange), en attendant a chaque fois son arrivee dans Telechargements.");
+  if (!garderBandeau) afficherBandeau("alerte", "Exports : EXPORTER TOUT (panneau orange), ou un appui par esclave. Verifiez ensuite les fichiers dans Telechargements.");
   const liste = document.getElementById("liste-secours");
   liste.textContent = "";
   actifs.forEach((a) => {
@@ -1845,6 +1852,32 @@ function secoursProposerExports() {
     liste.appendChild(ligne);
   });
   document.getElementById("panneau-secours").style.display = "block";
+}
+
+// EXPORTER TOUT (v2.2) : un cadre invisible (iframe) par esclave, tous crees
+// dans le meme appui. Un cadre n'est pas une fenetre pop-up : le bloqueur de
+// pop-up de Chrome, qui n'autorise qu'une fenetre par appui, ne s'applique
+// pas. Chaque export part vers une adresse differente, sans redirection d'un
+// meme onglet (cause des fichiers perdus en v1.1). Les cadres sont gardes
+// jusqu'au prochain EXPORTER TOUT pour ne pas couper un gros telechargement.
+// Aucune confirmation de reception possible : l'operateur controle le
+// dossier Telechargements.
+let cadresExport = [];
+function secoursExporterTout() {
+  const actifs = appareils.filter((a) => a.adresse);
+  if (actifs.length === 0) { journaliser("[onglets] Aucune adresse configuree."); return; }
+  cadresExport.forEach((c) => c.remove());
+  cadresExport = [];
+  actifs.forEach((a, i) => {
+    const c = document.createElement("iframe");
+    c.style.display = "none";
+    c.src = urlExport(a.adresse);
+    document.body.appendChild(c);
+    cadresExport.push(c);
+    journaliser("[onglets] Export " + (i + 1) + "/" + actifs.length + " : " + nomAffiche(a) + " (" + a.adresse + ")");
+  });
+  afficherBandeau("alerte", actifs.length + " export(s) lance(s). Verifiez dans Telechargements qu'il y a " + actifs.length + " fichier(s) .zip avant d'effacer.",
+    "Si Chrome demande l'autorisation de telecharger plusieurs fichiers : Autoriser. S'il manque un fichier, utilisez le bouton Exporter de cet esclave.");
 }
 
 function secoursToutFaire(cmd) {
@@ -1869,6 +1902,8 @@ document.getElementById("bouton-verifier").addEventListener("click", () => { pre
 document.getElementById("bouton-demarrer-tout").addEventListener("click", demarrerTout);
 document.getElementById("bouton-arreter-tout").addEventListener("click", arreterTout);
 document.getElementById("bouton-effacer-tout").addEventListener("click", effacerTout);
+document.getElementById("bouton-exporter-tout").addEventListener("click", () => { secoursExporterTout(); secoursProposerExports(true); });
+document.getElementById("bouton-exporter-tout-panneau").addEventListener("click", secoursExporterTout);
 document.getElementById("bouton-graine").addEventListener("click", rechercherDepuisGraine);
 document.getElementById("saisie-graine").addEventListener("keydown", (e) => { if (e.key === "Enter") rechercherDepuisGraine(); });
 const caseDirecte = document.getElementById("case-directe");
@@ -1878,6 +1913,8 @@ caseDirecte.checked = !reglages.modeSecours;
 function appliquerMode() {
   const direct = !reglages.modeSecours;
   document.getElementById("bouton-verifier").style.display = direct ? "" : "none";
+  // En verification directe, ARRETER TOUT recupere deja tous les fichiers.
+  document.getElementById("bouton-exporter-tout").style.display = direct ? "none" : "";
   if (!direct) {
     document.getElementById("panneau-graine").style.display = "none";
     document.getElementById("panneau-attribution").style.display = "none";
