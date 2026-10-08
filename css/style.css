@@ -205,3 +205,18 @@ footer{ text-align:center; color:var(--ink-soft); font-size:.82rem; padding:1rem
   .tableau-niveaux-comparaison{ break-inside:avoid; }
   .tableau-niveaux-comparaison .pastille{ print-color-adjust:exact; -webkit-print-color-adjust:exact; }
 }
+
+/* ------------------------------------------------ onglet Exposition patient */
+.pat-reglages{ background:#fafafa; border:1px solid var(--line); border-radius:8px; padding:1rem 1.1rem; margin-bottom:1rem; }
+.pat-grille{ display:grid; grid-template-columns:repeat(auto-fit, minmax(260px,1fr)); gap:.8rem 1.2rem; margin-bottom:.9rem; }
+.pat-grille label, .pat-mode-axes, .pat-seuil{ display:flex; flex-direction:column; gap:.3rem; font-size:.84rem; color:var(--ink-soft); font-weight:600; }
+.pat-mode-axes, .pat-seuil{ flex-direction:row; flex-wrap:wrap; align-items:center; margin:.6rem 0; }
+.pat-grille select, .pat-grille input, .pat-mode-axes select, .pat-seuil input{ font-size:.92rem; padding:.35rem .5rem; border-radius:6px; border:1px solid var(--line); background:#fff; }
+.pat-seuil input{ width:5em; margin:0 .3rem; }
+.pat-actions{ margin-top:.6rem; }
+.pat-section{ margin:1.4rem 0 1.8rem; }
+.pat-section h3{ font-size:1.02rem; color:var(--brand); margin:0 0 .7rem; }
+.pat-section h4{ font-size:.95rem; margin:1rem 0 .4rem; }
+.pat-table{ margin:.4rem 0 .6rem; }
+.pat-table td .note{ font-size:.75rem; }
+.pat-table .pastille{ width:10px; height:10px; border-radius:50%; display:inline-block; margin-right:.4rem; }

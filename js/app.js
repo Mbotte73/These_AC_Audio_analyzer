@@ -11,7 +11,7 @@
 // Numero de version affiche en pied de page (pas d'etape de build dans cet
 // outil : a incrementer ICI a la main a chaque evolution notable, avec la
 // date du jour). Seule constante a modifier pour changer l'indicateur.
-const VERSION_OUTIL = "v1.8 — 2 oct. 2026";
+const VERSION_OUTIL = "v1.9 — 8 oct. 2026";
 document.getElementById("pieDeVersion").textContent = VERSION_OUTIL;
 
 function nomVoie(i) { return `Voie ${i+1}`; }
@@ -522,6 +522,7 @@ function construireInterface() {
   onglets.push({ id: "comparaison", label: "Comparaison" });
   onglets.push({ id: "capteur", label: "Paramètres du capteur" });
   onglets.push({ id: "vol", label: "Trajet" });
+  onglets.push({ id: "patient", label: "Exposition patient" });
 
   for (const o of onglets) {
     const btn = document.createElement("button");
@@ -584,6 +585,7 @@ async function activerOnglet(id) {
   else if (id === "comparaison") rendreOngletComparaison(conteneur);
   else if (id === "capteur") rendreOngletCapteur(conteneur);
   else if (id === "vol") rendreOngletVol(conteneur);
+  else if (id === "patient") rendreOngletPatient(conteneur);
 }
 
 function rafraichirOngletActif() { activerOnglet(ongletActif); }
@@ -603,6 +605,7 @@ function preparerVueImpression() {
   rendreOngletComparaison(document.getElementById("contenu-comparaison"));
   rendreOngletCapteur(document.getElementById("contenu-capteur"));
   rendreOngletVol(document.getElementById("contenu-vol"));
+  rendreOngletPatient(document.getElementById("contenu-patient"));
   viderDessinsEnAttente();
   document.body.classList.remove("impression");
 }

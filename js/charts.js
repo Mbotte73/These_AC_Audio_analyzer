@@ -178,7 +178,15 @@ function tracerCourbe(canvas, series, opts) {
     if (yMax === undefined) yMax = mx;
   }
   if (!isFinite(yMin) || !isFinite(yMax)) { yMin = 0; yMax = 1; }
-  if (yMax - yMin < 1) { yMax += 0.5; yMin -= 0.5; }
+  // Etendue minimale de l'axe Y : comportement historique (+/- 0,5, adapte
+  // aux dB) sauf si opts.etendueMinY est fourni (accelerations en m/s²),
+  // auquel cas une borne basse imposee (opts.yMin) est respectee.
+  if (opts.etendueMinY === undefined) {
+    if (yMax - yMin < 1) { yMax += 0.5; yMin -= 0.5; }
+  } else if (yMax - yMin < opts.etendueMinY) {
+    if (opts.yMin !== undefined) yMax = yMin + opts.etendueMinY;
+    else { const m = (opts.etendueMinY - (yMax - yMin)) / 2; yMax += m; yMin -= m; }
+  }
 
   const ticksY = ticksLineaires(yMin, yMax, 6);
   const decY = opts.decimalesYAuto ? decimalesGraduations(ticksY) : 0;
@@ -254,6 +262,20 @@ function tracerCourbe(canvas, series, opts) {
     }
     ctx.stroke();
     ctx.setLineDash([]);
+  }
+  // lignes horizontales de repere optionnelles (seuils, 0 dB...), en
+  // tirets, avec un libelle facultatif cale a droite au-dessus de la ligne.
+  if (opts.lignesH) {
+    ctx.font = "11px sans-serif"; ctx.textAlign = "right"; ctx.textBaseline = "bottom";
+    for (const l of opts.lignesH) {
+      if (!isFinite(l.y) || l.y < yMin || l.y > yMax) continue;
+      const y = py(l.y);
+      ctx.strokeStyle = l.couleur || "#5b6270"; ctx.lineWidth = 1; ctx.setLineDash([5, 4]);
+      ctx.beginPath(); ctx.moveTo(M.l, y); ctx.lineTo(w-M.r, y); ctx.stroke();
+      ctx.setLineDash([]);
+      if (l.label) { ctx.fillStyle = l.couleur || "#5b6270"; ctx.fillText(l.label, w-M.r-4, y-2); }
+    }
+    ctx.font = "13px sans-serif";
   }
   ctx.restore();
 

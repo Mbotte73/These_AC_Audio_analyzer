@@ -141,11 +141,17 @@ function parserAccelPhyphox(texte) {
   }
 
   const temps = [], magnitude = [];
+  // Composantes par axe (onglet Exposition patient : spectres, ponderations
+  // ISO 2631-1), conservees seulement quand les trois axes sont presents.
+  const ax = [], ay = [], az = [];
   for (const l of donnees) {
     if (!isFinite(l[iT])) continue;
     let m;
-    if (parAxes && isFinite(l[iX]) && isFinite(l[iY]) && isFinite(l[iZ])) m = magnitude3(l[iX], l[iY], l[iZ]);
-    else if (iMag >= 0 && isFinite(l[iMag])) m = Math.abs(l[iMag]);
+    if (parAxes && isFinite(l[iX]) && isFinite(l[iY]) && isFinite(l[iZ])) {
+      m = magnitude3(l[iX], l[iY], l[iZ]);
+      ax.push(l[iX]); ay.push(l[iY]); az.push(l[iZ]);
+    }
+    else if (!parAxes && iMag >= 0 && isFinite(l[iMag])) m = Math.abs(l[iMag]);
     else continue;
     temps.push(l[iT]); magnitude.push(m);
   }
@@ -153,6 +159,7 @@ function parserAccelPhyphox(texte) {
 
   return {
     temps, magnitude, parAxes,
+    axes: parAxes ? [ax, ay, az] : null,
     instantAbsoluDebut: extraireInstantAbsoluDebut(entetesNorm, donnees),
   };
 }
