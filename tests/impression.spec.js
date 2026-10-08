@@ -49,9 +49,9 @@ test("beforeprint rend tous les onglets (jamais visites compris) avec des canvas
   expect(resultat.tailles["contenu-voie1"]).toBe(4);
   expect(resultat.tailles["contenu-voie2"]).toBe(4);
   expect(resultat.tailles["contenu-voie3"]).toBe(4);
-  expect(resultat.tailles["contenu-comparaison"]).toBe(1);
+  expect(resultat.tailles["contenu-comparaison"]).toBe(2); // spectres + niveaux sonores
   expect(resultat.tailles["contenu-capteur"]).toBe(2);
-  expect(resultat.totalCanvas).toBe(19);
+  expect(resultat.totalCanvas).toBe(20);
   expect(resultat.canvasVides).toBe(0);
 
   // rendu vraiment synchrone : aucune trace visible a l'ecran apres coup
@@ -64,4 +64,7 @@ test("beforeprint rend tous les onglets (jamais visites compris) avec des canvas
   for (const id of ["contenu-voie0","contenu-voie1","contenu-voie2","contenu-voie3","contenu-comparaison","contenu-capteur"]) {
     await expect(page.locator(`#${id}`)).toBeVisible();
   }
+  // tableau des niveaux globaux de l'onglet Comparaison, imprime lui aussi
+  await expect(page.locator("#tableau-niveaux-comparaison")).toBeVisible();
+  await expect(page.locator("#tableau-niveaux-comparaison tbody tr")).toHaveCount(4);
 });

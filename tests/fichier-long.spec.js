@@ -69,4 +69,18 @@ test("fichier de 10 minutes : chargement et analyse sans blocage, niveaux et spe
   expect(resultat.dureeFichierS).toBeGreaterThan(DUREE_S - 1);
 
   console.log(`[fichier-long] duree d'analyse (clic -> onglets prets) : ${(dureeAnalyseMs/1000).toFixed(1)} s, colonnes spectrogramme : ${resultat.nColonnesSpectro} (regroupement x${resultat.tramesGroupees || 1})`);
+
+  // Onglet Comparaison sur le meme fichier long : niveau court terme sur
+  // toute la duree (une valeur par seconde, axe en secondes), tableau des
+  // niveaux globaux identique au tableau de synthese.
+  await page.locator('#tabsNav button[data-onglet="comparaison"]').click();
+  await expect(page.locator("#tableau-niveaux-comparaison tbody tr")).toHaveCount(4, { timeout: 120_000 });
+  const synthese = await page.locator("#zoneResultats > .panel table tbody tr").evaluateAll(trs =>
+    trs.map(tr => Array.from(tr.querySelectorAll("td")).slice(1, 6).map(td => td.textContent.trim())));
+  const comparaison = await page.locator("#tableau-niveaux-comparaison tbody tr").evaluateAll(trs =>
+    trs.map(tr => Array.from(tr.querySelectorAll("td")).slice(1, 6).map(td => td.textContent.trim())));
+  // synthese : OASPL, LAeq, LCeq, LCpeak, LAFmax (meme ordre que la comparaison)
+  expect(comparaison).toEqual(synthese);
+  const nPoints = await page.evaluate(() => resultatsBase[0].temporel.temps.length);
+  expect(nPoints).toBe(DUREE_S);
 });

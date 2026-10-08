@@ -4,13 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Telecommande phyphox</title>
-<!-- Rend la page installable et utilisable hors reseau (PWA) : une fois
-     ouverte une premiere fois avec du reseau, le service worker garde une
-     copie locale de la page et de ses icones, donc les ouvertures suivantes
-     depuis l'icone sur l'ecran d'accueil fonctionnent meme sans aucun
-     acces internet (le pilotage des esclaves phyphox, lui, a toujours
-     fonctionne sans internet : c'etait uniquement le chargement de cette
-     page elle-meme qui en avait besoin jusqu'ici). -->
+<!-- Page installable et utilisable hors reseau (PWA) : voir sw.js. -->
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#2e7d32">
 <link rel="icon" href="icon-192.png">
@@ -21,6 +15,8 @@
     --vert-fonce: #1b5e20;
     --rouge: #c62828;
     --rouge-fonce: #8e0000;
+    --orange: #e65100;
+    --bleu: #1565c0;
     --gris: #555;
     --fond: #f4f4f4;
   }
@@ -32,16 +28,37 @@
     padding: 16px;
     color: #222;
   }
-  h1 {
-    font-size: 1.3em;
-    text-align: center;
-    margin: 4px 0 16px 0;
+  h1 { font-size: 1.3em; text-align: center; margin: 4px 0 4px 0; }
+  #version-telecommande { text-align: center; font-size: 0.75em; color: var(--gris); margin: 0 0 14px; }
+  button { font-family: inherit; touch-action: manipulation; cursor: pointer; }
+  button:disabled { opacity: 0.45; cursor: default; }
+
+  .bandeau {
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin-bottom: 14px;
+    font-size: 0.95em;
+    line-height: 1.35;
+    font-weight: bold;
   }
-  .bloc-global {
-    display: flex;
-    gap: 12px;
-    margin-bottom: 20px;
+  .bandeau.neutre { background: #e0e0e0; color: #333; }
+  .bandeau.ok { background: #c8e6c9; color: #1b5e20; border: 2px solid var(--vert); }
+  .bandeau.alerte { background: #ffe0b2; color: #3e2723; border: 2px solid var(--orange); }
+  .bandeau.erreur { background: #ffcdd2; color: #5d0000; border: 2px solid var(--rouge); }
+  .bandeau .detail { font-weight: normal; font-size: 0.9em; margin-top: 4px; }
+
+  .bouton-verifier {
+    width: 100%;
+    padding: 16px 10px;
+    font-size: 1.1em;
+    font-weight: bold;
+    color: white;
+    background: var(--bleu);
+    border: none;
+    border-radius: 10px;
+    margin-bottom: 14px;
   }
+  .bloc-global { display: flex; gap: 12px; margin-bottom: 12px; }
   .bouton-global {
     flex: 1;
     padding: 22px 10px;
@@ -50,21 +67,13 @@
     color: white;
     border: none;
     border-radius: 10px;
-    cursor: pointer;
-    touch-action: manipulation;
   }
   .bouton-global.demarrer { background: var(--vert); }
   .bouton-global.demarrer:active { background: var(--vert-fonce); }
   .bouton-global.arreter { background: var(--rouge); }
   .bouton-global.arreter:active { background: var(--rouge-fonce); }
-
-  .bloc-global-secondaire {
-    display: flex;
-    gap: 12px;
-    margin-bottom: 20px;
-  }
-  .bouton-global-secondaire {
-    flex: 1;
+  .bouton-secondaire {
+    width: 100%;
     padding: 12px 10px;
     font-size: 0.95em;
     font-weight: bold;
@@ -72,9 +81,49 @@
     background: #37474f;
     border: none;
     border-radius: 8px;
-    cursor: pointer;
-    touch-action: manipulation;
+    margin-bottom: 18px;
   }
+
+  .panneau {
+    background: white;
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin-bottom: 14px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+  }
+  .panneau.important { border: 2px solid var(--orange); }
+  .panneau h2 { font-size: 1em; margin: 0 0 8px 0; }
+  .panneau p { font-size: 0.9em; margin: 0 0 8px 0; line-height: 1.35; }
+  .ligne-saisie { display: flex; gap: 8px; }
+  .ligne-saisie input, .ligne-saisie select {
+    flex: 1;
+    min-width: 0;
+    padding: 9px;
+    font-size: 1em;
+    border: 1px solid #bbb;
+    border-radius: 6px;
+  }
+  .ligne-saisie button {
+    padding: 9px 14px;
+    font-weight: bold;
+    color: white;
+    background: var(--bleu);
+    border: none;
+    border-radius: 6px;
+  }
+  .fichier { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid #eee; font-size: 0.9em; }
+  .fichier:first-of-type { border-top: none; }
+  .fichier .nom { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .fichier button {
+    padding: 10px 12px;
+    font-weight: bold;
+    color: white;
+    background: var(--orange);
+    border: none;
+    border-radius: 6px;
+    white-space: nowrap;
+  }
+  .fichier button.fait { background: #9e9e9e; }
 
   .carte-appareil {
     background: white;
@@ -82,465 +131,1802 @@
     padding: 12px 14px;
     margin-bottom: 12px;
     box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+    border-left: 6px solid #bdbdbd;
   }
-  .carte-appareil h2 {
-    font-size: 1em;
-    margin: 0 0 8px 0;
-  }
-  .ligne-adresse {
-    display: flex;
-    gap: 8px;
-    margin-bottom: 8px;
-  }
+  .carte-appareil.etat-pret { border-left-color: var(--vert); }
+  .carte-appareil.etat-mesure { border-left-color: var(--bleu); }
+  .carte-appareil.etat-alerte { border-left-color: var(--orange); }
+  .carte-appareil.etat-erreur { border-left-color: var(--rouge); }
+  .ligne-adresse { display: flex; gap: 8px; margin-bottom: 6px; }
   .ligne-adresse input {
-    flex: 1;
+    min-width: 0;
     padding: 8px;
     font-size: 0.95em;
     border: 1px solid #ccc;
     border-radius: 6px;
   }
-  .ligne-boutons {
-    display: flex;
-    gap: 8px;
+  .ligne-adresse input.nom { flex: 0 0 32%; font-weight: bold; }
+  .ligne-adresse input.port { flex: 0 0 4.2em; font-family: Consolas, Menlo, monospace; font-size: 0.88em; text-align: center; }
+  @media (max-width: 380px) {
+    .ligne-adresse { flex-wrap: wrap; }
+    .ligne-adresse input.nom { flex: 1 1 100%; }
   }
+  .aide-reseau { font-size: 0.85em; color: var(--gris); margin: 4px 2px 10px 2px; line-height: 1.4; }
+  .aide-reseau.alerte { color: #7a4a00; background: #fff3e0; border: 1px solid var(--orange); border-radius: 6px; padding: 8px; }
+  .ligne-adresse input.adresse { flex: 1; font-family: Consolas, Menlo, monospace; font-size: 0.88em; }
+  .ligne-adresse input.invalide { border: 2px solid var(--rouge); background: #fff5f5; }
+  .pastille {
+    display: inline-block;
+    padding: 3px 9px;
+    border-radius: 12px;
+    font-size: 0.8em;
+    font-weight: bold;
+    color: white;
+    background: #9e9e9e;
+  }
+  .pastille.etat-pret { background: var(--vert); }
+  .pastille.etat-mesure { background: var(--bleu); }
+  .pastille.etat-alerte { background: var(--orange); }
+  .pastille.etat-erreur { background: var(--rouge); }
+  .infos-appareil { font-size: 0.8em; color: var(--gris); margin: 4px 0 8px 0; line-height: 1.35; }
+  .ligne-boutons { display: flex; gap: 8px; }
+  .ligne-boutons + .ligne-boutons { margin-top: 6px; }
   .ligne-boutons button {
     flex: 1;
-    padding: 10px;
-    font-size: 0.95em;
+    padding: 10px 6px;
+    font-size: 0.9em;
     font-weight: bold;
     color: white;
     border: none;
     border-radius: 6px;
-    cursor: pointer;
-    touch-action: manipulation;
   }
   .ligne-boutons button.demarrer { background: var(--vert); }
   .ligne-boutons button.arreter { background: var(--rouge); }
   .ligne-boutons button.exporter { background: #37474f; }
   .ligne-boutons button.effacer { background: #8d6e00; }
-  .ligne-boutons2 {
-    display: flex;
-    gap: 8px;
-    margin-top: 6px;
+  .ligne-boutons button.voir { background: var(--bleu); }
+  .ligne-boutons button.supprimer { flex: 0 0 auto; background: #999; padding: 10px 14px; }
+  .bouton-ajout {
+    width: 100%;
+    padding: 10px;
+    margin-top: 4px;
+    border-radius: 8px;
+    border: 1px dashed #999;
+    background: white;
+    color: #555;
+    font-size: 0.9em;
   }
-  .ligne-boutons2 button {
-    flex: 1;
-    padding: 8px;
-    font-size: 0.85em;
-    font-weight: bold;
-    color: white;
-    border: none;
-    border-radius: 6px;
-    cursor: pointer;
-    touch-action: manipulation;
-  }
-  .statut {
-    margin-top: 6px;
-    font-size: 0.85em;
-    color: var(--gris);
-  }
+
+  .titre-journal { font-size: 0.9em; color: var(--gris); margin: 16px 0 4px 0; }
   .bloc-journal {
     background: #1e1e1e;
     color: #d4d4d4;
     border-radius: 8px;
     padding: 10px 12px;
     font-family: Consolas, Menlo, monospace;
-    font-size: 0.8em;
-    height: 160px;
+    font-size: 0.78em;
+    height: 170px;
     overflow-y: auto;
     white-space: pre-wrap;
-    margin-top: 8px;
+    overflow-wrap: anywhere;
   }
-  .titre-journal {
-    font-size: 0.9em;
-    color: var(--gris);
-    margin: 16px 0 4px 0;
-  }
-  .aide {
-    font-size: 0.8em;
-    color: var(--gris);
-    margin-top: 16px;
-    line-height: 1.4;
-  }
-  .bloc-confirmation {
-    background: #ffb300;
-    border: 2px solid #e65100;
-    border-radius: 10px;
-    padding: 14px;
-    margin-bottom: 20px;
-    text-align: center;
-  }
-  .bloc-confirmation .confirmation-texte {
-    font-size: 0.95em;
-    font-weight: bold;
-    color: #3e2723;
-    margin-bottom: 10px;
-    line-height: 1.35;
-  }
-  .bloc-confirmation button {
+  details.avance { margin-top: 16px; font-size: 0.9em; }
+  details.avance summary { color: var(--gris); cursor: pointer; padding: 6px 0; }
+  details.avance label { display: flex; gap: 8px; align-items: flex-start; margin: 8px 0; line-height: 1.35; }
+  .aide { font-size: 0.8em; color: var(--gris); margin-top: 16px; line-height: 1.45; }
+  .bouton-couper {
+    display: block;
     width: 100%;
-    padding: 16px 10px;
-    font-size: 1.1em;
+    margin-top: 10px;
+    padding: 12px;
     font-weight: bold;
     color: white;
-    background: #e65100;
+    background: #5d0000;
     border: none;
     border-radius: 8px;
-    cursor: pointer;
-    touch-action: manipulation;
   }
 </style>
 </head>
 <body>
 
 <h1>Telecommande phyphox</h1>
-<!-- Numero de version, incremente a la main a chaque modification (voir
-     VERSION_TELECOMMANDE plus bas dans le script). Sert a confirmer d'un
-     coup d'oeil, sur le telephone, qu'une mise a jour a bien ete recuperee
-     — sans ca, rien ne distingue une ancienne version d'une nouvelle. -->
-<div id="version-telecommande" style="text-align:center; font-size:0.75em; color:var(--gris); margin:-10px 0 14px;"></div>
+<div id="version-telecommande"></div>
 
-<div class="bloc-confirmation" id="bloc-confirmation" style="display:none;">
-  <div class="confirmation-texte" id="confirmation-texte"></div>
-  <button id="confirmation-bouton" onclick="confirmerExportSuivant()">Fichier suivant</button>
+<div id="bandeau-etat" class="bandeau neutre">Appuyez sur VERIFIER LES ESCLAVES avant chaque vol.</div>
+
+<!-- Fichiers recuperes apres ARRETER TOUT (ou un export individuel) -->
+<div id="panneau-fichiers" class="panneau important" style="display:none;">
+  <h2 id="titre-fichiers">Fichiers recuperes</h2>
+  <p>Les donnees sont recuperees et controlees en memoire. Appuyez sur chaque bouton pour les enregistrer dans Telechargements, puis verifiez leur presence.</p>
+  <div id="liste-fichiers"></div>
 </div>
+
+<!-- Methode par onglets : exports a declencher un par un -->
+<div id="panneau-secours" class="panneau important" style="display:none;">
+  <h2>Exports a declencher (methode par onglets)</h2>
+  <p>Un appui par fichier, en attendant a chaque fois son arrivee dans Telechargements.</p>
+  <div id="liste-secours"></div>
+</div>
+
+<!-- Reseau change : demande l'adresse d'UN esclave pour retrouver les autres -->
+<div id="panneau-graine" class="panneau important" style="display:none;">
+  <h2>Esclave(s) introuvable(s)</h2>
+  <p id="texte-graine"></p>
+  <div class="ligne-saisie">
+    <input id="saisie-graine" type="text" inputmode="decimal" autocomplete="off" placeholder="ex : 192.168.57.183">
+    <button id="bouton-graine" type="button">Rechercher</button>
+  </div>
+</div>
+
+<!-- Telephones phyphox trouves mais non attribues automatiquement -->
+<div id="panneau-attribution" class="panneau important" style="display:none;">
+  <h2>Telephones a identifier</h2>
+  <p>Ces telephones repondent mais n'ont pas pu etre reconnus avec certitude (modele inconnu ou deux telephones du meme modele). Pour chacun, regardez l'adresse affichee en bas de l'ecran phyphox des esclaves et choisissez la fiche correspondante.</p>
+  <div id="liste-attribution"></div>
+</div>
+
+<button id="bouton-verifier" class="bouton-verifier" type="button">VERIFIER LES ESCLAVES</button>
 
 <div class="bloc-global">
-  <button class="bouton-global demarrer" onclick="toutFaire('start')">DEMARRER TOUT</button>
-  <button class="bouton-global arreter" onclick="toutFaire('stop')">ARRETER TOUT</button>
+  <button id="bouton-demarrer-tout" class="bouton-global demarrer" type="button">DEMARRER TOUT</button>
+  <button id="bouton-arreter-tout" class="bouton-global arreter" type="button">ARRETER TOUT</button>
 </div>
-<div class="bloc-global-secondaire">
-  <button class="bouton-global-secondaire" onclick="effacerTout()">Effacer tout</button>
-</div>
+<button id="bouton-effacer-tout" class="bouton-secondaire" type="button">Effacer tout (preparer le vol suivant)</button>
 
+<div id="aide-reseau" class="aide-reseau"></div>
 <div id="conteneur-appareils"></div>
 
 <div class="titre-journal">Journal</div>
 <div class="bloc-journal" id="journal"></div>
 
+<details class="avance">
+  <summary>Reglages avances</summary>
+  <label>
+    <input type="checkbox" id="case-directe">
+    <span>Verification directe (experimentale, desactivee par defaut). Elle exige phyphox 1.2.1 ou plus sur les esclaves et Chrome 142 ou plus avec l'autorisation "reseau local" sur ce telephone. Si toutes les fiches restent "Injoignable", decochez : la methode par onglets est utilisee.</span>
+  </label>
+  <p id="texte-sous-reseaux" style="color:var(--gris);"></p>
+</details>
+
 <div class="aide">
-  Saisissez une seule fois le nom et l'adresse de chaque esclave (adresse affichee dans phyphox, onglet "Remote access", par exemple 192.168.43.23:8080). Tout est memorise sur ce telephone/navigateur.
+  Avant chaque vol, sur chaque esclave : ouvrir l'experience phyphox, menu des 3 points, "Acces a distance", puis noter l'adresse affichee en bas de l'ecran phyphox. Ici, taper l'adresse COMPLETE du premier esclave (par exemple 192.168.57.183) ; pour les autres, le dernier nombre suffit. Le port est 8080 sauf indication contraire de phyphox. Le bouton Voir ouvre la page de l'esclave (courbe en direct) : il permet de controler que c'est le bon telephone.
   <br><br>
-  Pour un vol : DEMARRER TOUT au decollage (demarre les esclaves ; le GPS du master se lance a la main, directement dans phyphox). A l'atterrissage, ARRETER TOUT arrete chaque esclave puis enchaine sur l'export : un bloc orange apparait en haut de la page, avec un bouton a appuyer pour chaque fichier ("Fichier suivant"). C'est volontaire : Chrome bloque parfois un telechargement qui n'est pas declenche par un appui direct, donc chaque fichier attend maintenant un vrai appui plutot que de s'enchainer tout seul en silence (et de risquer d'en perdre un). Les fichiers arrivent dans le dossier Telechargements du master ; il faudra les recuperer depuis le master a la fin de la journee (cable, Drive...), mais plus besoin d'aller sur les esclaves.
+  Au decollage : DEMARRER TOUT. La methode par onglets n'a aucune confirmation de reception : controlez que chaque esclave mesure (bouton Voir, ou son ecran).
   <br><br>
-  Entre deux vols, sans toucher les esclaves : une fois l'export automatique termine (voir le journal), appuyez sur "Effacer tout" pour vider la memoire de chaque esclave et repartir propre avant le vol suivant. Besoin de re-exporter un appareil precis a part ? Utilisez le bouton "Exporter" individuel, sous sa fiche.
+  A l'atterrissage : ARRETER TOUT, puis un appui sur "Exporter" par esclave, en verifiant a chaque fois l'arrivee du fichier dans Telechargements. Ensuite seulement : "Effacer tout".
+  <br><br>
+  Sur les esclaves : phyphox doit rester a l'ecran pendant tout le vol (ne pas appuyer sur le bouton marche/arret, ne pas changer d'application, mode avion + Wi-Fi pour eviter les appels) : phyphox arrete la mesure et l'acces a distance des qu'il quitte l'ecran.
+  <br><br>
+  Verification directe (Reglages avances, experimentale) : si elle est activee et que Chrome l'autorise, VERIFIER LES ESCLAVES controle l'identite, l'etat et la memoire de chaque esclave, et la telecommande surveille la mesure en vol. Elle ne remplace pas la methode par onglets tant qu'elle n'a pas ete validee sur vos telephones.
 </div>
 
 <script>
-// A incrementer a chaque modification de cette page (avec une courte
-// description), pour pouvoir verifier sur le telephone, apres un
-// deploiement, que la mise a jour a bien ete recuperee plutot que de se
-// fier a l'impression que "ca a l'air de marcher".
-const VERSION_TELECOMMANDE = "1.2 — 27 sept. 2026 (retrait du bouton Exporter tout)";
+"use strict";
+
+// A incrementer a chaque modification, pour verifier sur le telephone que la
+// mise a jour a bien ete recuperee.
+const VERSION_TELECOMMANDE = "2.1 (3 oct. 2026) : methode par onglets par defaut, saisie simple des adresses";
 document.getElementById("version-telecommande").textContent = "v" + VERSION_TELECOMMANDE;
 
-const CLE_STOCKAGE = "phyphox_appareils";
+/* =========================================================================
+   Principes (v2.0)
 
-function chargerAppareils() {
-  try {
-    const brut = localStorage.getItem(CLE_STOCKAGE);
-    if (brut) {
-      const liste = JSON.parse(brut);
-      if (Array.isArray(liste) && liste.length > 0) return liste;
-    }
-  } catch (e) {}
-  return [
-    { nom: "Esclave 1", adresse: "" },
-    { nom: "Esclave 2", adresse: "" }
-  ];
-}
+   1. Communication directe avec phyphox (fetch) au lieu d'onglets ouverts
+      "a l'aveugle" : chaque commande est confirmee en relisant l'etat reel
+      de l'esclave. Conditions : phyphox >= 1.2.1 (en-tete CORS
+      "Access-Control-Allow-Origin: *", verifie dans son code source) et
+      Chrome >= 142 avec l'autorisation "acces au reseau local" (une page
+      https peut alors joindre une adresse IP privee 192.168.x.x ; verifie
+      sur Chromium 153).
 
-function sauverAppareils(liste) {
-  try {
-    localStorage.setItem(CLE_STOCKAGE, JSON.stringify(liste));
-  } catch (e) {}
-}
+   2. Identite : chaque fiche memorise la "signature" du telephone (marque,
+      modele, version d'Android, lus par /meta) et la "session" phyphox
+      (/get, tiree au hasard a l'ouverture de l'experience). Avant toute
+      commande ou export, l'identite du telephone qui repond est controlee :
+      un fichier ne peut pas etre enregistre sous le nom d'un autre
+      telephone. Deux telephones du meme modele ne sont distingues que par
+      la session ; en cas de doute, l'operateur tranche (jamais de
+      supposition).
 
-let appareils = chargerAppareils();
+   3. Etat des donnees lu sur le telephone : /time renvoie la liste des
+      demarrages/pauses de l'enregistrement en memoire (vide apres un
+      effacement). L'"empreinte" (nombre d'evenements + heure du premier
+      demarrage) identifie l'enregistrement : effacer n'est propose sans
+      alerte que si cet enregistrement exact a ete enregistre ici.
+
+   4. Adresses : si un esclave ne repond plus a son adresse, le sous-reseau
+      connu est balaye et le telephone retrouve par son identite.
+
+   5. Surveillance en vol toutes les 15 s, avec alarme sonore et vibration.
+
+   6. Methode par onglets (v1.2) : c'est la methode PAR DEFAUT depuis la
+      v2.1. Constat sur un vrai telephone (3 oct. 2026) : la lecture directe
+      de la v2.0 ne joignait aucun esclave (cause non determinee : version de
+      Chrome, autorisation reseau local ou autre). Ouvrir un onglet vers
+      http://192.168.x.x ne depend d'aucune de ces conditions. La
+      verification directe reste disponible en option (Reglages avances).
+
+   7. Saisie des adresses (v2.1) : le port est un champ a part (le clavier
+      numerique d'Android n'a pas la touche "deux-points") et, une fois le
+      reseau connu, taper le seul dernier nombre suffit.
+   ========================================================================= */
+
+const CLE_APPAREILS = "phyphox_appareils";       // meme cle qu'en v1.x (reprise des reglages)
+const CLE_REGLAGES = "telecommande_reglages";
+const PORT_DEFAUT = 8080;
+// Ports essayes lors d'une recherche : phyphox >= 1.2.1 passe a 8081, 8082...
+// si 8080 est deja occupe sur le telephone (verifie dans son code source).
+const PORTS_RECHERCHE = [8080, 8081, 8082, 8083];
+// Format d'export phyphox : 1 = "CSV (Comma, decimal point)", archive ZIP.
+// (La v1.x utilisait 2 = CSV separe par tabulations, que l'onglet Vol de
+// l'analyseur ne sait pas lire : il attend "," ou ";".)
+const FORMAT_EXPORT = 1;
+
+const DELAI_REQUETE_MS = 4000;
+// Recherche : une adresse sans telephone echoue d'elle-meme en ~3 s (pas de
+// reponse ARP) ; le delai de sonde est un peu plus long pour laisser cet
+// echec se produire normalement plutot que d'abandonner la connexion (des
+// connexions abandonnees peuvent rester pendantes dans Chrome et retarder
+// les requetes suivantes : constate en test).
+const DELAI_SONDE_MS = 3500;
+const DELAI_DEMARRAGE_MS = 9000;   // phyphox attend jusqu'a 5 s le verdict du demarrage
+const DELAI_EXPORT_MS = 600000;    // gros fichiers : generation sur le telephone puis transfert
+const PARALLELISME_RECHERCHE = 32;
+const PERIODE_SURVEILLANCE_MS = 15000;
+
+// ------------------------------------------------------------- utilitaires
+function pause(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
 function journaliser(texte) {
   const zone = document.getElementById("journal");
-  const heure = new Date().toLocaleTimeString();
+  const heure = new Date().toLocaleTimeString("fr-FR");
   zone.textContent += "[" + heure + "] " + texte + "\n";
   zone.scrollTop = zone.scrollHeight;
 }
 
-function majAdresse(index, valeur) {
-  appareils[index].adresse = valeur.trim();
-  sauverAppareils(appareils);
+function heureCourte(d) {
+  return (d || new Date()).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
 }
 
-function majNom(index, valeur) {
-  appareils[index].nom = valeur.trim();
-  sauverAppareils(appareils);
+function tailleLisible(octets) {
+  if (octets < 1024) return octets + " o";
+  if (octets < 1024 * 1024) return (octets / 1024).toFixed(0) + " Ko";
+  return (octets / 1024 / 1024).toFixed(1).replace(".", ",") + " Mo";
 }
 
-function ajouterAppareil() {
-  appareils.push({ nom: "Appareil " + (appareils.length + 1), adresse: "" });
-  sauverAppareils(appareils);
-  dessiner();
+function nouvelId() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
 
-function supprimerAppareil(index) {
-  appareils.splice(index, 1);
-  sauverAppareils(appareils);
-  dessiner();
+// Accepte "192.168.1.5", "192.168.1.5:8081", "http://192.168.1.5:8080/",
+// "192,168,1,5" (virgules du clavier numerique), espaces parasites.
+// Renvoie "a.b.c.d:port" ou null si l'adresse est invalide.
+function normaliserAdresse(brut) {
+  if (typeof brut !== "string") return null;
+  let s = brut.trim().replace(/\s+/g, "").replace(/,/g, ".");
+  s = s.replace(/^https?:\/\//i, "").replace(/\/.*$/, "");
+  const m = s.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?::(\d{1,5}))?$/);
+  if (!m) return null;
+  const octets = m.slice(1, 5).map(Number);
+  if (octets.some((o) => o > 255)) return null;
+  const port = m[5] ? Number(m[5]) : PORT_DEFAUT;
+  if (port < 1 || port > 65535) return null;
+  return octets.join(".") + ":" + port;
 }
 
-function baseUrl(adresse) {
-  let base = adresse;
-  if (!base.startsWith("http://") && !base.startsWith("https://")) {
-    base = "http://" + base;
+function sousReseau(adresse) {
+  return adresse.split(":")[0].split(".").slice(0, 3).join(".");
+}
+
+// Separe "192.168.43.23:8080" en { ip, port } pour les deux champs de saisie.
+function decouperAdresse(adresse) {
+  if (!adresse) return { ip: "", port: "" };
+  const i = adresse.lastIndexOf(":");
+  return i < 0 ? { ip: adresse, port: "" } : { ip: adresse.slice(0, i), port: adresse.slice(i + 1) };
+}
+
+// Debut commun (3 premiers nombres) du reseau en cours : le plus recemment
+// saisi, sinon celui de la derniere fiche qui a une adresse.
+function prefixeCourant() {
+  if (reglages.sousReseaux.length) return reglages.sousReseaux[0];
+  const avec = appareils.filter((a) => a.adresse);
+  return avec.length ? sousReseau(avec[avec.length - 1].adresse) : "";
+}
+
+// Saisie d'une adresse : adresse complete (192.168.43.23 ou 192.168.43.23:8080,
+// y compris collee depuis phyphox), ou seulement le dernier nombre (194) si
+// le reseau est deja connu. Le port vient du champ port (8080 si vide), sauf
+// s'il est donne dans l'adresse elle-meme.
+function interpreterSaisie(brutAdresse, brutPort) {
+  let a = String(brutAdresse || "").trim().replace(/\s+/g, "").replace(/,/g, ".");
+  a = a.replace(/^https?:\/\//i, "").replace(/\/.*$/, "");
+  if (a === "") return { vide: true };
+  if (/^\d{1,3}$/.test(a)) {
+    const prefixe = prefixeCourant();
+    if (!prefixe) return { erreur: "reseau inconnu : tapez d'abord l'adresse complete (par ex. 192.168.43.23)" };
+    a = prefixe + "." + a;
   }
-  return base.replace(/\/$/, "");
-}
-
-function construireUrl(adresse, cmd) {
-  return baseUrl(adresse) + "/control?cmd=" + cmd;
-}
-
-// format=2 correspond au CSV cote phyphox (0 = Excel, 2 = CSV).
-function construireUrlExport(adresse) {
-  return baseUrl(adresse) + "/export?format=2";
-}
-
-// Ni fetch() ni iframe ne fonctionnent de maniere fiable depuis une page
-// ouverte via un gestionnaire de fichiers (content://). En revanche une
-// vraie navigation (comme taper l'adresse dans Chrome, ou comme un
-// telechargement declenche par un lien) fonctionne toujours. On declenche
-// donc chaque action en ouvrant un nouvel onglet sur l'URL voulue, puis on
-// le referme tout seul juste apres (sauf pour un export, ou le navigateur
-// gere lui-meme le telechargement puis on referme).
-function ouvrirUnOnglet(url, dureeAvantFermeture) {
-  const fenetre = window.open(url, "_blank");
-  journaliser(url + " -> onglet ouvert");
-  if (fenetre) {
-    setTimeout(() => {
-      try { fenetre.close(); } catch (e) {}
-    }, dureeAvantFermeture || 1500);
-    return true;
-  }
-  journaliser("Le navigateur a peut-etre bloque l'ouverture (pop-up). Verifiez l'autorisation des pop-up pour cette page.");
-  return false;
-}
-
-function commanderUn(index, cmd) {
-  const a = appareils[index];
-  if (!a.adresse) { journaliser("Adresse vide, commande ignoree."); return; }
-  journaliser((a.nom || "Appareil") + " : envoi " + cmd + "...");
-  ouvrirUnOnglet(construireUrl(a.adresse, cmd), 1500);
-}
-
-function exporterUn(index) {
-  const a = appareils[index];
-  if (!a.adresse) { journaliser("Adresse vide, export ignore."); return; }
-  journaliser((a.nom || "Appareil") + " : export...");
-  ouvrirUnOnglet(construireUrlExport(a.adresse), 3000);
-}
-
-// Un seul onglet, navigue successivement vers chaque etape de la liste, puis
-// se referme. Necessaire car la plupart des navigateurs mobiles bloquent
-// l'ouverture de plusieurs fenetres depuis un seul clic (bloqueur de pop-up).
-// "etapes" est un tableau de { url, delai } — le delai est celui a attendre
-// APRES avoir charge cette URL avant de passer a la suivante (ou de fermer
-// l'onglet si c'est la derniere). N'utiliser QUE pour des commandes
-// (start/stop/clear) qui ne declenchent aucun telechargement : voir plus bas
-// pourquoi les exports ne peuvent pas s'enchainer de la meme facon.
-// onTermine (optionnel) est appele une fois l'onglet referme.
-function ouvrirSequence(etapes, libelle, onTermine) {
-  if (etapes.length === 0) {
-    journaliser("Aucune adresse configuree.");
-    return;
-  }
-  const fenetre = window.open(etapes[0].url, "_blank");
-  if (!fenetre) {
-    journaliser("Pop-up bloque par le navigateur. Autorisez les pop-up pour cette page, puis reessayez.");
-    return;
-  }
-  journaliser(etapes[0].url + " -> onglet ouvert (1/" + etapes.length + ")");
-
-  let i = 1;
-  function suivante() {
-    if (i >= etapes.length) {
-      setTimeout(() => {
-        try { fenetre.close(); } catch (e) {}
-        journaliser("=== " + libelle + " termine ===");
-        if (onTermine) onTermine();
-      }, etapes[etapes.length - 1].delai);
-      return;
+  if (a.indexOf(":") < 0) {
+    // Pas de port dans l'adresse : celui du champ port (8080 si vide).
+    const port = String(brutPort || "").trim().replace(/\s+/g, "");
+    if (port !== "" && (!/^\d{1,5}$/.test(port) || Number(port) < 1 || Number(port) > 65535)) {
+      return { erreur: "port invalide \"" + port + "\" (un nombre de 1 a 65535 est attendu, par ex. 8080)", portInvalide: true };
     }
-    setTimeout(() => {
-      try {
-        fenetre.location.href = etapes[i].url;
-        journaliser(etapes[i].url + " -> onglet redirige (" + (i + 1) + "/" + etapes.length + ")");
-      } catch (e) {
-        journaliser("Erreur de redirection : " + e.message);
-      }
-      i++;
-      suivante();
-    }, etapes[i - 1].delai);
+    a += ":" + (port === "" ? PORT_DEFAUT : port);
   }
-  suivante();
+  const n = normaliserAdresse(a);
+  return n ? { adresse: n } : { erreur: "adresse invalide \"" + brutAdresse + "\" (attendu par ex. 192.168.43.23)" };
 }
 
-// ---------------------------------------------------------------- exports
-// Un export declenche un telechargement de fichier. Chrome Android bloque
-// (ou demande une autorisation qui disparait vite) tout telechargement qui
-// n'est pas directement declenche par un appui de l'utilisateur : chaque
-// fichier attend donc un appui explicite sur "Fichier suivant" (bloc orange
-// en haut de page), ce qui constitue a chaque fois un nouveau geste
-// utilisateur valide pour Chrome.
-//
-// Point important (bug corrige) : chaque fichier s'ouvre desormais dans son
-// PROPRE onglet, jamais reutilise pour le fichier suivant. La version
-// precedente redirigeait le meme onglet (fenetre.location.href = ...) vers
-// l'adresse suivante des l'appui sur "Fichier suivant" : si le
-// telechargement du fichier precedent n'avait pas fini de demarrer, cette
-// redirection l'interrompait — et le fichier n'etait jamais enregistre,
-// sans aucune erreur visible dans le journal. Avec un onglet independant par
-// fichier, ce risque n'existe plus, quel que soit le rythme des appuis.
-let exportGuide = null; // { actifs, declenches, libelle }
+// ---------------------------------------------------------------- stockage
+// "modeSecours" vrai = methode par onglets (nom interne conserve).
+// Depuis la v2.1 c'est la methode par defaut : les reglages d'une version
+// anterieure (sans "schema") ne sont pas repris pour ce choix.
+const SCHEMA_REGLAGES = 2;
+function chargerReglages() {
+  try {
+    const r = JSON.parse(localStorage.getItem(CLE_REGLAGES) || "{}");
+    return {
+      schema: SCHEMA_REGLAGES,
+      modeSecours: r.schema === SCHEMA_REGLAGES ? r.modeSecours === true : true,
+      sousReseaux: Array.isArray(r.sousReseaux) ? r.sousReseaux.filter((x) => typeof x === "string") : [],
+    };
+  } catch (e) {
+    return { schema: SCHEMA_REGLAGES, modeSecours: true, sousReseaux: [] };
+  }
+}
 
-// Delai avant fermeture automatique de l'onglet d'un export, large pour
-// laisser le temps au telechargement de vraiment se terminer (fichier de
-// plusieurs minutes d'enregistrement, reseau local parfois lent) sans
-// dependre du rythme auquel l'operateur appuie sur les boutons.
-const DELAI_FERMETURE_EXPORT_MS = 6000;
+function sauverReglages() {
+  try { localStorage.setItem(CLE_REGLAGES, JSON.stringify(reglages)); } catch (e) {}
+}
 
-function ouvrirExportUnique(appareil, numero, total) {
-  const fenetre = window.open(construireUrlExport(appareil.adresse), "_blank");
-  if (!fenetre) {
-    journaliser("Pop-up bloque par le navigateur. Autorisez les pop-up pour cette page, puis reessayez.");
+const messagesDeReprise = [];
+
+function chargerAppareils() {
+  let liste = null;
+  try {
+    const brut = localStorage.getItem(CLE_APPAREILS);
+    if (brut) liste = JSON.parse(brut);
+  } catch (e) {}
+  if (!Array.isArray(liste) || liste.length === 0) {
+    liste = [{ nom: "Esclave 1", adresse: "" }, { nom: "Esclave 2", adresse: "" }];
+  }
+  // Reprise des reglages v1.x ({nom, adresse}) : ajout des champs v2.
+  return liste.map((a) => {
+    const nom = typeof a.nom === "string" ? a.nom : "";
+    const brute = typeof a.adresse === "string" ? a.adresse.trim() : "";
+    const adresse = normaliserAdresse(brute) || "";
+    if (brute && !adresse) messagesDeReprise.push((nom || "Fiche sans nom") + " : ancienne adresse illisible \"" + brute + "\" effacee, a ressaisir.");
+    return {
+      id: typeof a.id === "string" ? a.id : nouvelId(),
+      nom,
+      adresse,
+      signature: typeof a.signature === "string" ? a.signature : "",
+      modele: typeof a.modele === "string" ? a.modele : "",
+      session: typeof a.session === "string" ? a.session : "",
+      // Empreinte du dernier enregistrement de ce telephone effectivement
+      // enregistre dans Telechargements depuis cette page (voir principe 3).
+      empreinteSauvegardee: typeof a.empreinteSauvegardee === "string" ? a.empreinteSauvegardee : "",
+      // Mesure demarree (et confirmee) par la telecommande, pas encore arretee :
+      // sert a la surveillance en vol, y compris apres rechargement de la page.
+      mesureAttendue: a.mesureAttendue === true,
+      // Session phyphox constatee au demarrage confirme de la mesure : si
+      // elle change en vol, phyphox a ete relance (mesure interrompue).
+      sessionMesure: typeof a.sessionMesure === "string" ? a.sessionMesure : "",
+    };
+  });
+}
+
+function sauverAppareils() {
+  const persistants = appareils.map((a) => ({
+    id: a.id, nom: a.nom, adresse: a.adresse, signature: a.signature, modele: a.modele,
+    session: a.session, empreinteSauvegardee: a.empreinteSauvegardee, mesureAttendue: a.mesureAttendue,
+    sessionMesure: a.sessionMesure,
+  }));
+  try { localStorage.setItem(CLE_APPAREILS, JSON.stringify(persistants)); } catch (e) {}
+}
+
+const reglages = chargerReglages();
+sauverReglages();
+let appareils = chargerAppareils();
+sauverAppareils(); // memorise tout de suite les adresses normalisees (reprise v1.x)
+// Etat courant de chaque appareil (non memorise) : { code, detail }
+const etats = new Map();
+// Telephones phyphox trouves lors d'une recherche mais non attribues
+let nonAttribues = [];
+// Fichiers recuperes : { ficheId, nomAppareil, nomFichier, blob, url, empreinte, complet, enregistre }
+let fichiers = [];
+let operationEnCours = false;
+
+function nomAffiche(a) { return a.nom || "Appareil sans nom"; }
+
+// ------------------------------------------------------------- transport
+class ErreurAppareil extends Error {
+  constructor(type, message) { super(message); this.type = type; }
+}
+
+// Requete GET vers un esclave. "lecture" lit le corps (json, blob) DANS la
+// fenetre de delai : un fichier qui n'arrive pas en entier est une erreur.
+async function requete(adresse, chemin, lecture, options) {
+  const delaiMs = (options && options.delaiMs) || DELAI_REQUETE_MS;
+  const sansCors = !!(options && options.sansCors);
+  const controleur = new AbortController();
+  const minuteur = setTimeout(() => controleur.abort(), delaiMs);
+  try {
+    const init = { cache: "no-store", signal: controleur.signal };
+    if (sansCors) init.mode = "no-cors";
+    const reponse = await fetch("http://" + adresse + chemin, init);
+    if (sansCors) return null;
+    if (!reponse.ok) throw new ErreurAppareil("http", "reponse HTTP " + reponse.status);
+    return lecture ? await lecture(reponse) : reponse;
+  } catch (e) {
+    if (e instanceof ErreurAppareil) throw e;
+    if (e && e.name === "AbortError") {
+      throw new ErreurAppareil("delai", "pas de reponse en " + Math.round(delaiMs / 1000) + " s");
+    }
+    if (e && e.name === "SyntaxError") throw new ErreurAppareil("contenu", "reponse illisible");
+    throw new ErreurAppareil("reseau", "connexion impossible");
+  } finally {
+    clearTimeout(minuteur);
+  }
+}
+
+function lireJson(adresse, chemin, delaiMs) {
+  return requete(adresse, chemin, (r) => r.json(), { delaiMs });
+}
+
+// L'appareil repond-il en HTTP, meme sans autoriser la lecture (phyphox < 1.2.1) ?
+async function repondSansCors(adresse) {
+  try {
+    await requete(adresse, "/get", null, { delaiMs: DELAI_SONDE_MS, sansCors: true });
+    return true;
+  } catch (e) {
     return false;
   }
-  journaliser((appareil.nom || "Appareil") + " : export (" + numero + "/" + total + ") declenche.");
-  setTimeout(() => { try { fenetre.close(); } catch (e) {} }, DELAI_FERMETURE_EXPORT_MS);
-  return true;
 }
 
-function demarrerExportsGuides(actifs, libelle) {
-  if (actifs.length === 0) {
-    journaliser("Aucune adresse configuree pour l'export.");
-    return;
+async function lireStatut(adresse, delaiMs) {
+  const r = await lireJson(adresse, "/get", delaiMs);
+  if (!r || !r.status || typeof r.status.measuring !== "boolean") {
+    throw new ErreurAppareil("contenu", "reponse inattendue (est-ce bien phyphox ?)");
   }
-  if (!ouvrirExportUnique(actifs[0], 1, actifs.length)) return;
-
-  if (actifs.length === 1) {
-    journaliser("=== " + libelle + " termine ===");
-    return;
-  }
-
-  exportGuide = { actifs, declenches: 1, libelle };
-  afficherBoutonExportSuivant();
+  return r.status;
 }
 
-function afficherBoutonExportSuivant() {
-  const bloc = document.getElementById("bloc-confirmation");
-  const texte = document.getElementById("confirmation-texte");
-  const bouton = document.getElementById("confirmation-bouton");
-  const { actifs, declenches } = exportGuide;
-  if (declenches < actifs.length) {
-    texte.textContent = "Fichier " + declenches + "/" + actifs.length + " declenche (verifiez son arrivee dans Telechargements). Appuyez ci-dessous pour lancer le suivant.";
-    bouton.textContent = "Fichier suivant (" + (declenches + 1) + "/" + actifs.length + ")";
-  } else {
-    texte.textContent = "Tous les fichiers ont ete declenches. Appuyez pour fermer ce bandeau.";
-    bouton.textContent = "Terminer";
-  }
-  bloc.style.display = "block";
+// Liste des demarrages/pauses de l'enregistrement en memoire ([] = vide).
+async function lireEvenements(adresse, delaiMs) {
+  const r = await lireJson(adresse, "/time", delaiMs);
+  if (!Array.isArray(r)) throw new ErreurAppareil("contenu", "reponse /time inattendue");
+  return r;
 }
 
-function confirmerExportSuivant() {
-  if (!exportGuide) return;
-  const { actifs, declenches, libelle } = exportGuide;
-
-  if (declenches >= actifs.length) {
-    document.getElementById("bloc-confirmation").style.display = "none";
-    journaliser("=== " + libelle + " termine ===");
-    exportGuide = null;
-    return;
-  }
-
-  const a = actifs[declenches];
-  ouvrirExportUnique(a, declenches + 1, actifs.length);
-  exportGuide.declenches++;
-  afficherBoutonExportSuivant();
+// Identifie un enregistrement : "" si la memoire est vide.
+function empreinte(evenements) {
+  if (!evenements || evenements.length === 0) return "";
+  return evenements.length + "@" + evenements[0].systemTime;
 }
 
-function toutFaire(cmd) {
-  const estArret = cmd === "stop";
-  const actifs = appareils.filter((a) => a.adresse);
-
-  if (!estArret) {
-    journaliser("=== DEMARRAGE GLOBAL ===");
-    ouvrirSequence(actifs.map((a) => ({ url: construireUrl(a.adresse, cmd), delai: 900 })), "Demarrage");
-    return;
-  }
-
-  // Au clic sur ARRETER TOUT : arret automatique de chaque appareil (pas de
-  // telechargement, donc pas de restriction Chrome), puis enchainement sur
-  // l'export guide (un appui par fichier) pour ne jamais oublier de
-  // recuperer les donnees.
-  journaliser("=== ARRET GLOBAL (export guide ensuite, un appui par fichier) ===");
-  ouvrirSequence(
-    actifs.map((a) => ({ url: construireUrl(a.adresse, "stop"), delai: 900 })),
-    "Arret",
-    () => demarrerExportsGuides(actifs, "Export apres arret")
-  );
+function nombreDemarrages(evenements) {
+  return (evenements || []).filter((e) => e && e.event === "START").length;
 }
 
-function effacerTout() {
-  journaliser("=== EFFACEMENT GLOBAL ===");
-  const etapes = appareils.filter((a) => a.adresse).map((a) => ({ url: construireUrl(a.adresse, "clear"), delai: 900 }));
-  ouvrirSequence(etapes, "Effacement");
+function signatureDe(meta) {
+  return [meta.deviceBrand, meta.deviceModel, meta.deviceRelease].map((x) => String(x || "?")).join("|");
+}
+
+function modeleDe(meta) {
+  return [meta.deviceBrand, meta.deviceModel].filter(Boolean).join(" ")
+    + (meta.deviceRelease ? " (Android " + meta.deviceRelease + ")" : "")
+    + (meta.version ? ", phyphox " + meta.version : "");
+}
+
+// Interroge un esclave : etat de mesure et session (indispensables),
+// identite, experience ouverte, enregistrement en memoire (complementaires).
+async function interroger(adresse, delaiMs) {
+  const statut = await lireStatut(adresse, delaiMs);
+  const [meta, config, temps] = await Promise.allSettled([
+    lireJson(adresse, "/meta", delaiMs),
+    lireJson(adresse, "/config", delaiMs),
+    lireEvenements(adresse, delaiMs),
+  ]);
+  const info = {
+    adresse, mesure: statut.measuring, session: String(statut.session || ""),
+    signature: "", modele: "", titre: "", evenements: null,
+  };
+  if (meta.status === "fulfilled" && meta.value) {
+    info.signature = signatureDe(meta.value);
+    info.modele = modeleDe(meta.value);
+  }
+  if (config.status === "fulfilled" && config.value) {
+    info.titre = config.value.localTitle || config.value.title || "";
+  }
+  if (temps.status === "fulfilled") info.evenements = temps.value;
+  return info;
+}
+
+// Permission "acces au reseau local" de Chrome. Son nom a change : Chrome
+// 142 a introduit "local-network-access", les versions recentes utilisent
+// "local-network" (et repondent alors "denied" pour l'ancien nom, verifie
+// sur Chromium 153). On interroge donc le nom recent EN PREMIER, et l'ancien
+// seulement s'il n'existe pas. "inconnu" si aucun n'est disponible.
+async function etatPermissionReseauLocal() {
+  if (!navigator.permissions || !navigator.permissions.query) return "inconnu";
+  for (const nom of ["local-network", "local-network-access"]) {
+    try {
+      const r = await navigator.permissions.query({ name: nom });
+      return r.state;
+    } catch (e) {}
+  }
+  return "inconnu";
+}
+
+async function executerEnParallele(elements, parallelisme, tache, surProgression) {
+  let suivant = 0, faits = 0;
+  async function ouvrier() {
+    while (suivant < elements.length) {
+      const element = elements[suivant++];
+      try { await tache(element); } catch (e) {}
+      faits++;
+      if (surProgression) surProgression(faits, elements.length);
+    }
+  }
+  const ouvriers = [];
+  for (let i = 0; i < Math.min(parallelisme, elements.length); i++) ouvriers.push(ouvrier());
+  await Promise.all(ouvriers);
+}
+
+// --------------------------------------------------------------- identite
+function estHomonyme(a) {
+  return !!a.signature && appareils.some((x) => x !== a && x.signature === a.signature);
+}
+
+// Controle que le telephone qui repond a l'adresse de la fiche est bien le
+// sien. Renvoie { ok, homonyme, message, statut }.
+async function controlerIdentite(a) {
+  const [statut, meta] = await Promise.all([lireStatut(a.adresse), lireJson(a.adresse, "/meta")]);
+  const signature = signatureDe(meta);
+  const session = String(statut.session || "");
+  if (a.signature && signature !== a.signature) {
+    return { ok: false, homonyme: false, statut,
+      message: "un autre telephone (" + modeleDe(meta) + ") repond a cette adresse : appuyez sur VERIFIER LES ESCLAVES" };
+  }
+  if (estHomonyme(a) && (!a.session || session !== a.session)) {
+    return { ok: false, homonyme: true, statut,
+      message: "identite non confirmee (meme modele qu'une autre fiche, et phyphox a ete relance) : appuyez sur VERIFIER LES ESCLAVES" };
+  }
+  if (!a.signature) { a.signature = signature; a.modele = modeleDe(meta); }
+  a.session = session;
+  sauverAppareils();
+  return { ok: true, statut };
+}
+
+// ------------------------------------------------------------- affichage
+const TEXTES_ETAT = {
+  inconnu: "Non verifie",
+  vide: "Adresse a saisir",
+  pret: "Pret (a l'arret)",
+  mesure: "Mesure en cours",
+  ancien: "phyphox a mettre a jour",
+  autre: "Autre telephone a cette adresse",
+  aconfirmer: "Identite a confirmer",
+  injoignable: "Injoignable",
+  alerte: "ALERTE",
+  bloque: "Acces bloque par Chrome",
+  secours: "Methode par onglets (sans confirmation)",
+  travail: "En cours...",
+};
+const CLASSE_ETAT = {
+  pret: "etat-pret", mesure: "etat-mesure", ancien: "etat-alerte", autre: "etat-alerte", aconfirmer: "etat-alerte",
+  injoignable: "etat-erreur", bloque: "etat-erreur", alerte: "etat-erreur",
+};
+
+function definirEtat(a, code, detail) {
+  etats.set(a.id, { code, detail: detail || "" });
+  majCarte(a);
+}
+
+function etatDe(a) {
+  if (!a.adresse) return { code: "vide", detail: "" };
+  if (reglages.modeSecours) return { code: "secours", detail: "" };
+  return etats.get(a.id) || { code: "inconnu", detail: "" };
+}
+
+function descriptionDonnees(a, evenements) {
+  if (evenements === null || evenements === undefined) return "";
+  if (evenements.length === 0) return "Memoire vide";
+  const n = nombreDemarrages(evenements);
+  const debut = new Date(evenements[0].systemTime * 1000);
+  return "Contient un enregistrement (debut " + heureCourte(debut) + (n > 1 ? ", " + n + " demarrages" : "") + ")"
+    + (empreinte(evenements) === a.empreinteSauvegardee ? ", deja enregistre ici" : ", PAS encore enregistre ici");
+}
+
+function afficherBandeau(classe, texte, detail) {
+  const b = document.getElementById("bandeau-etat");
+  b.className = "bandeau " + classe;
+  b.textContent = texte;
+  if (detail) {
+    const d = document.createElement("div");
+    d.className = "detail";
+    d.textContent = detail;
+    b.appendChild(d);
+  }
+  return b;
+}
+
+function majCarte(a) {
+  const carte = document.querySelector('[data-id="' + a.id + '"]');
+  if (!carte) return;
+  const etat = etatDe(a);
+  const classe = CLASSE_ETAT[etat.code] || "";
+  carte.className = "carte-appareil " + classe;
+  const pastille = carte.querySelector(".pastille");
+  pastille.className = "pastille " + classe;
+  pastille.textContent = TEXTES_ETAT[etat.code] || etat.code;
+  const infos = [];
+  if (a.modele) infos.push(a.modele);
+  if (etat.detail) infos.push(etat.detail);
+  carte.querySelector(".infos-appareil").textContent = infos.join(" | ");
+  const champ = carte.querySelector("input.adresse");
+  const champPort = carte.querySelector("input.port");
+  if (document.activeElement !== champ && document.activeElement !== champPort) {
+    const p = decouperAdresse(a.adresse);
+    champ.value = p.ip;
+    if (a.adresse) champPort.value = p.port;
+    champ.classList.remove("invalide");
+    champPort.classList.remove("invalide");
+  }
+}
+
+// "toujoursActif" : bouton utilisable meme pendant une operation (enregistrement des fichiers).
+function creerBouton(texte, classe, action, toujoursActif) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.textContent = texte;
+  if (classe) b.className = classe;
+  if (toujoursActif) b.dataset.toujoursActif = "1";
+  b.addEventListener("click", () => {
+    if (operationEnCours && !toujoursActif) return;
+    action();
+  });
+  if (operationEnCours && !toujoursActif) b.disabled = true;
+  return b;
 }
 
 function dessiner() {
   const conteneur = document.getElementById("conteneur-appareils");
-  conteneur.innerHTML = "";
-  appareils.forEach((a, index) => {
+  conteneur.textContent = "";
+  appareils.forEach((a) => {
     const carte = document.createElement("div");
-    carte.className = "carte-appareil";
-    carte.innerHTML = `
-      <div class="ligne-adresse">
-        <input type="text" placeholder="nom (ex: Master GPS)"
-               value="${a.nom || ""}"
-               oninput="majNom(${index}, this.value)"
-               style="flex: 0 0 40%; font-weight: bold;">
-        <input type="text" placeholder="ex: 192.168.43.23:8080"
-               value="${a.adresse || ""}"
-               oninput="majAdresse(${index}, this.value)">
-      </div>
-      <div class="ligne-boutons">
-        <button class="demarrer" onclick="commanderUn(${index}, 'start')">Demarrer</button>
-        <button class="arreter" onclick="commanderUn(${index}, 'stop')">Arreter</button>
-        <button onclick="supprimerAppareil(${index})" style="flex: 0 0 auto; background: #999;">&times;</button>
-      </div>
-      <div class="ligne-boutons2">
-        <button class="exporter" onclick="exporterUn(${index})">Exporter</button>
-        <button class="effacer" onclick="commanderUn(${index}, 'clear')">Effacer</button>
-      </div>
-    `;
+    carte.dataset.id = a.id;
+
+    const ligne = document.createElement("div");
+    ligne.className = "ligne-adresse";
+    const champNom = document.createElement("input");
+    champNom.type = "text";
+    champNom.className = "nom";
+    champNom.placeholder = "nom (ex : Accelero avant)";
+    champNom.value = a.nom;
+    champNom.addEventListener("input", () => { a.nom = champNom.value.trim(); sauverAppareils(); });
+    const champAdresse = document.createElement("input");
+    champAdresse.type = "text";
+    champAdresse.className = "adresse";
+    champAdresse.inputMode = "decimal";
+    champAdresse.autocomplete = "off";
+    champAdresse.placeholder = "adresse (ex : 194)";
+    const champPort = document.createElement("input");
+    champPort.type = "text";
+    champPort.className = "port";
+    champPort.inputMode = "numeric";
+    champPort.autocomplete = "off";
+    champPort.maxLength = 5;
+    champPort.placeholder = "8080";
+    champPort.title = "Port affiche par phyphox (8080 en general)";
+    const parties = decouperAdresse(a.adresse);
+    champAdresse.value = parties.ip;
+    champPort.value = parties.port;
+    function validerSaisie() {
+      if (operationEnCours) { majCarte(a); return; }
+      const r = interpreterSaisie(champAdresse.value, champPort.value);
+      if (r.vide) {
+        a.adresse = "";
+        champAdresse.classList.remove("invalide");
+        champPort.classList.remove("invalide");
+      } else if (!r.adresse) {
+        (r.portInvalide ? champPort : champAdresse).classList.add("invalide");
+        journaliser(nomAffiche(a) + " : " + r.erreur + ". Non enregistree.");
+        return;
+      } else {
+        champAdresse.classList.remove("invalide");
+        champPort.classList.remove("invalide");
+        if (r.adresse !== a.adresse) {
+          a.adresse = r.adresse;
+          // Adresse saisie a la main : l'identite sera relue a la verification.
+          a.signature = "";
+          a.modele = "";
+          a.session = "";
+        }
+        memoriserSousReseau(sousReseau(r.adresse));
+      }
+      sauverAppareils();
+      etats.delete(a.id);
+      // Les champs montrent toujours l'adresse effectivement retenue, meme si
+      // l'un d'eux a encore le focus (touche Entree sans quitter le champ).
+      // Adresse effacee : le port deja saisi est conserve pour la suivante.
+      if (a.adresse) {
+        const retenue = decouperAdresse(a.adresse);
+        champAdresse.value = retenue.ip;
+        champPort.value = retenue.port;
+      } else {
+        champAdresse.value = "";
+      }
+      majCarte(a);
+      majAideReseau();
+    }
+    champAdresse.addEventListener("change", validerSaisie);
+    champPort.addEventListener("change", validerSaisie);
+    ligne.append(champNom, champAdresse, champPort);
+
+    const pastille = document.createElement("span");
+    pastille.className = "pastille";
+    const infos = document.createElement("div");
+    infos.className = "infos-appareil";
+
+    const boutons1 = document.createElement("div");
+    boutons1.className = "ligne-boutons";
+    boutons1.append(
+      creerBouton("Demarrer", "demarrer", () => actionIndividuelle(a, "start")),
+      creerBouton("Arreter", "arreter", () => actionIndividuelle(a, "stop")),
+      creerBouton("×", "supprimer", () => supprimerAppareil(a))
+    );
+    const boutons2 = document.createElement("div");
+    boutons2.className = "ligne-boutons";
+    boutons2.append(
+      creerBouton("Exporter", "exporter", () => actionIndividuelle(a, "export")),
+      creerBouton("Effacer", "effacer", () => actionIndividuelle(a, "clear")),
+      creerBouton("Voir", "voir", () => ouvrirPageEsclave(a), true)
+    );
+    carte.append(ligne, pastille, infos, boutons1, boutons2);
     conteneur.appendChild(carte);
+    majCarte(a);
   });
-  const boutonAjout = document.createElement("button");
-  boutonAjout.textContent = "+ Ajouter un appareil";
-  boutonAjout.style.cssText = "width:100%; padding:10px; margin-top:4px; border-radius:8px; border:1px dashed #999; background:white; color:#555; font-size:0.9em;";
-  boutonAjout.onclick = ajouterAppareil;
-  conteneur.appendChild(boutonAjout);
+  conteneur.appendChild(creerBouton("+ Ajouter un appareil", "bouton-ajout", ajouterAppareil));
+  majAideReseau();
+  document.getElementById("texte-sous-reseaux").textContent =
+    "Sous-reseaux memorises : " + (sousReseauxConnus().map((p) => p + ".x").join(", ") || "aucun");
+  if (operationEnCours) verrouiller(true);
 }
 
+function ajouterAppareil() {
+  appareils.push({ id: nouvelId(), nom: "Appareil " + (appareils.length + 1), adresse: "", signature: "", modele: "", session: "", empreinteSauvegardee: "", mesureAttendue: false, sessionMesure: "" });
+  sauverAppareils();
+  dessiner();
+}
+
+function supprimerAppareil(a) {
+  if (!window.confirm("Supprimer la fiche \"" + nomAffiche(a) + "\" ?")) return;
+  appareils = appareils.filter((x) => x !== a);
+  etats.delete(a.id);
+  sauverAppareils();
+  dessiner();
+}
+
+// Pendant une operation : tous les boutons et champs sont desactives, sauf
+// l'enregistrement des fichiers deja recuperes.
+let compteurOperations = 0;
+function verrouiller(actif, libelle) {
+  if (actif) compteurOperations++;
+  operationEnCours = actif;
+  document.querySelectorAll("button, input, select").forEach((el) => {
+    if (el.closest("#panneau-fichiers") || el.dataset.toujoursActif) return;
+    el.disabled = actif;
+  });
+  if (actif && libelle) afficherBandeau("neutre", libelle);
+}
+
+// ------------------------------------------------------ sous-reseaux connus
+function memoriserSousReseau(prefixe) {
+  reglages.sousReseaux = [prefixe].concat(reglages.sousReseaux.filter((p) => p !== prefixe)).slice(0, 4);
+  sauverReglages();
+}
+
+// Ligne d'aide au-dessus des fiches : reseau en cours, et alerte si les
+// adresses des fiches ne sont pas toutes sur le meme reseau.
+function majAideReseau() {
+  const zone = document.getElementById("aide-reseau");
+  if (!zone) return;
+  const reseaux = Array.from(new Set(appareils.filter((a) => a.adresse).map((a) => sousReseau(a.adresse))));
+  zone.className = "aide-reseau" + (reseaux.length > 1 ? " alerte" : "");
+  if (reseaux.length > 1) {
+    zone.textContent = "Attention : les fiches ne sont pas toutes sur le meme reseau (" + reseaux.map((r) => r + ".x").join(" et ")
+      + "). Retapez les adresses qui ne correspondent pas au reseau actuel.";
+  } else if (prefixeCourant()) {
+    zone.textContent = "Reseau en cours : " + prefixeCourant() + ".x. Il suffit de taper le dernier nombre de l'adresse de chaque esclave. Si le reseau a change, tapez l'adresse complete du premier esclave.";
+  } else {
+    zone.textContent = "Tapez l'adresse complete du premier esclave (par ex. 192.168.43.23) ; pour les suivants, le dernier nombre suffira.";
+  }
+}
+
+// Ouvre la page de controle de l'esclave (courbe en direct) : sert a verifier
+// que c'est le bon telephone et qu'il mesure.
+function ouvrirPageEsclave(a) {
+  if (!a.adresse) { journaliser(nomAffiche(a) + " : pas d'adresse."); return; }
+  const fenetre = window.open("http://" + a.adresse + "/", "_blank");
+  journaliser("[onglets] page de " + nomAffiche(a) + " ouverte (" + a.adresse + ")");
+  if (!fenetre) journaliser("[onglets] Pop-up bloque : autorisez les pop-up pour cette page.");
+}
+
+function sousReseauxConnus() {
+  const s = new Set();
+  appareils.forEach((a) => { if (a.adresse) s.add(sousReseau(a.adresse)); });
+  reglages.sousReseaux.forEach((p) => s.add(p));
+  return Array.from(s);
+}
+
+// -------------------------------------------------------------- verification
+// Verifie un appareil a son adresse memorisee. Renvoie l'info lue si c'est
+// bien le bon telephone, null sinon (et positionne son etat).
+async function verifierUn(a) {
+  if (!a.adresse) { definirEtat(a, "vide"); return null; }
+  try {
+    const info = await interroger(a.adresse, DELAI_REQUETE_MS);
+    if (a.signature && info.signature && info.signature !== a.signature) {
+      definirEtat(a, "autre", "A " + a.adresse + " repond : " + (info.modele || "telephone inconnu"));
+      return null;
+    }
+    if (estHomonyme(a) && (!a.session || info.session !== a.session)) {
+      definirEtat(a, "aconfirmer", "Meme modele qu'une autre fiche et phyphox relance depuis : impossible de savoir lequel des deux repond ici");
+      return null;
+    }
+    if (!a.signature && info.signature) a.signature = info.signature;
+    if (info.modele) a.modele = info.modele;
+    a.session = info.session;
+    sauverAppareils();
+    const details = [];
+    if (info.titre) details.push("Experience : " + info.titre);
+    const donnees = descriptionDonnees(a, info.evenements);
+    if (donnees) details.push(donnees);
+    definirEtat(a, info.mesure ? "mesure" : "pret", details.join(" | "));
+    return info;
+  } catch (e) {
+    if (e.type === "reseau" && await repondSansCors(a.adresse)) {
+      definirEtat(a, "ancien", "Repond, mais phyphox est trop ancien pour etre verifie : mettez-le a jour (1.2.1 ou plus) depuis le Play Store.");
+      return null;
+    }
+    definirEtat(a, "injoignable", a.adresse + " : " + e.message);
+    return null;
+  }
+}
+
+// Passe 1 : port 8080 sur toutes les adresses du sous-reseau. Un telephone
+// present mais dont phyphox utilise un autre port refuse la connexion sur
+// 8080 presque instantanement : seules ces adresses "vivantes" sont ensuite
+// sondees sur les ports 8081 a 8083 (passe 2). Chaque passe est toujours
+// complete (pas d'arret anticipe), pour qu'un second telephone du meme
+// modele soit vu et que l'ambiguite soit soumise a l'operateur.
+async function rechercher(prefixes, adressesDejaConnues) {
+  const trouves = [];
+  const vus = new Set();
+  const vivants = new Set();
+  for (const port of PORTS_RECHERCHE) {
+    const premierePasse = port === PORTS_RECHERCHE[0];
+    const cibles = [];
+    prefixes.forEach((p) => { for (let h = 1; h <= 254; h++) cibles.push(p + "." + h); });
+    const aSonder = cibles
+      .filter((ip) => !vus.has(ip) && (premierePasse || vivants.has(ip)))
+      .map((ip) => ip + ":" + port)
+      .filter((adr) => !adressesDejaConnues.has(adr));
+    if (aSonder.length === 0) continue;
+    await executerEnParallele(aSonder, PARALLELISME_RECHERCHE, async (adresse) => {
+      const ip = adresse.split(":")[0];
+      const debut = Date.now();
+      try {
+        const info = await interroger(adresse, DELAI_SONDE_MS);
+        trouves.push(info);
+        vus.add(ip);
+      } catch (e) {
+        if (premierePasse && e.type === "reseau" && Date.now() - debut < 1500) vivants.add(ip);
+        throw e;
+      }
+    }, (n, total) => {
+      if (n % 16 === 0 || n === total) {
+        afficherBandeau("neutre", "Recherche des esclaves (environ 25 s)... port " + port + " : " + n + "/" + total);
+      }
+    });
+    attribuerAutomatiquement(trouves, false);
+    if (appareilsManquants().length === 0) break;
+  }
+  return trouves;
+}
+
+function estOk(a) {
+  const c = etatDe(a).code;
+  return c === "pret" || c === "mesure";
+}
+
+function appareilsManquants() {
+  return appareils
+    .filter((a) => a.adresse !== "" || a.signature !== "")
+    .filter((a) => !estOk(a) && etatDe(a).code !== "ancien");
+}
+
+// Attribue les telephones trouves aux fiches manquantes UNIQUEMENT sans
+// ambiguite : signature unique parmi les fiches et un seul telephone
+// candidat ; pour deux fiches du meme modele, la session doit en plus
+// correspondre. Avec "definitif", les telephones restants sont proposes a
+// l'operateur.
+function attribuerAutomatiquement(trouves, definitif) {
+  const adressesOk = new Set(appareils.filter(estOk).map((a) => a.adresse));
+  const libres = trouves.filter((t) => !adressesOk.has(t.adresse));
+  for (const a of appareilsManquants()) {
+    if (!a.signature) continue;
+    let candidats = libres.filter((t) => t.signature === a.signature);
+    if (estHomonyme(a)) candidats = a.session ? candidats.filter((t) => t.session === a.session) : [];
+    if (candidats.length !== 1) continue;
+    const t = candidats[0];
+    journaliser(nomAffiche(a) + " : nouvelle adresse " + (a.adresse || "(vide)") + " -> " + t.adresse + " (reconnu : " + t.modele + ")");
+    a.adresse = t.adresse;
+    a.modele = t.modele || a.modele;
+    a.session = t.session;
+    sauverAppareils();
+    memoriserSousReseau(sousReseau(t.adresse));
+    const details = ["Adresse retrouvee automatiquement"];
+    if (t.titre) details.push("Experience : " + t.titre);
+    const donnees = descriptionDonnees(a, t.evenements);
+    if (donnees) details.push(donnees);
+    definirEtat(a, t.mesure ? "mesure" : "pret", details.join(" | "));
+    libres.splice(libres.indexOf(t), 1);
+  }
+  if (definitif) {
+    nonAttribues = libres;
+    dessinerAttribution();
+  }
+}
+
+function dessinerAttribution() {
+  const panneau = document.getElementById("panneau-attribution");
+  const liste = document.getElementById("liste-attribution");
+  liste.textContent = "";
+  const fichesLibres = appareils.filter((a) => !estOk(a));
+  if (nonAttribues.length === 0) { panneau.style.display = "none"; return; }
+  nonAttribues.forEach((t) => {
+    const bloc = document.createElement("div");
+    bloc.style.margin = "8px 0";
+    const desc = document.createElement("p");
+    desc.textContent = t.adresse + " : " + (t.modele || "modele inconnu") + (t.titre ? " | " + t.titre : "") + (t.mesure ? " | MESURE EN COURS" : "");
+    const ligne = document.createElement("div");
+    ligne.className = "ligne-saisie";
+    const choix = document.createElement("select");
+    const vide = document.createElement("option");
+    vide.value = ""; vide.textContent = "Correspond a la fiche...";
+    choix.appendChild(vide);
+    fichesLibres.forEach((a) => {
+      const o = document.createElement("option");
+      o.value = a.id; o.textContent = nomAffiche(a);
+      choix.appendChild(o);
+    });
+    const nouveau = document.createElement("option");
+    nouveau.value = "__nouveau"; nouveau.textContent = "+ Nouvelle fiche";
+    choix.appendChild(nouveau);
+    const bouton = creerBouton("Attribuer", "", () => attribuerManuellement(t, choix.value));
+    ligne.append(choix, bouton);
+    bloc.append(desc, ligne);
+    liste.appendChild(bloc);
+  });
+  panneau.style.display = "block";
+}
+
+async function attribuerManuellement(t, idFiche) {
+  if (!idFiche || operationEnCours) return;
+  verrouiller(true, "Controle de " + t.adresse + "...");
+  let erreur = false;
+  try {
+    // Relecture : les informations de la recherche peuvent dater. Si ce
+    // n'est plus le meme telephone (meme signature ET meme session), on
+    // n'attribue rien.
+    let info;
+    try {
+      info = await interroger(t.adresse, DELAI_REQUETE_MS);
+    } catch (e) {
+      erreur = true;
+      afficherBandeau("erreur", t.adresse + " ne repond plus (" + e.message + ").", "Relancez VERIFIER LES ESCLAVES.");
+      return;
+    }
+    if (info.signature !== t.signature || info.session !== t.session) {
+      erreur = true;
+      afficherBandeau("erreur", "Le telephone a l'adresse " + t.adresse + " a change depuis la recherche.", "Rien n'a ete attribue. Relancez VERIFIER LES ESCLAVES.");
+      return;
+    }
+    let a;
+    if (idFiche === "__nouveau") {
+      a = { id: nouvelId(), nom: "Appareil " + (appareils.length + 1), adresse: "", signature: "", modele: "", session: "", empreinteSauvegardee: "", mesureAttendue: false, sessionMesure: "" };
+      appareils.push(a);
+    } else {
+      a = appareils.find((x) => x.id === idFiche);
+      if (!a) return;
+    }
+    a.adresse = info.adresse;
+    a.signature = info.signature;
+    a.modele = info.modele;
+    a.session = info.session;
+    sauverAppareils();
+    memoriserSousReseau(sousReseau(info.adresse));
+    journaliser(nomAffiche(a) + " : attribue par l'operateur a " + info.adresse + " (" + info.modele + ")");
+    const details = [];
+    if (info.titre) details.push("Experience : " + info.titre);
+    const donnees = descriptionDonnees(a, info.evenements);
+    if (donnees) details.push(donnees);
+    etats.set(a.id, { code: info.mesure ? "mesure" : "pret", detail: details.join(" | ") });
+    nonAttribues = nonAttribues.filter((x) => x.adresse !== t.adresse);
+  } finally {
+    verrouiller(false);
+    dessiner();
+    dessinerAttribution();
+    if (!erreur) resumerVerification();
+  }
+}
+
+function resumerVerification() {
+  const configures = appareils.filter((a) => a.adresse || a.signature);
+  const ok = configures.filter(estOk);
+  const heure = heureCourte();
+  if (configures.length === 0) {
+    afficherBandeau("alerte", "Aucun esclave configure.", "Saisissez l'adresse affichee par phyphox sur chaque esclave.");
+    return;
+  }
+  const problemes = configures.filter((a) => !estOk(a)).map((a) => nomAffiche(a) + " : " + TEXTES_ETAT[etatDe(a).code]);
+  const parAdresse = new Map();
+  configures.forEach((a) => { if (a.adresse) parAdresse.set(a.adresse, (parAdresse.get(a.adresse) || []).concat([a])); });
+  parAdresse.forEach((liste, adresse) => {
+    if (liste.length > 1) problemes.push(liste.map(nomAffiche).join(" et ") + " ont la MEME adresse " + adresse + " : une des deux fiches est fausse");
+  });
+  if (problemes.length === 0) {
+    const enMesure = ok.filter((a) => etatDe(a).code === "mesure").length;
+    afficherBandeau("ok", "Verification " + heure + " : " + ok.length + "/" + configures.length + " esclaves joignables et identifies.",
+      enMesure ? enMesure + " deja en mesure." : "Tous a l'arret. Verifiez sur chaque fiche : \"Memoire vide\" avant un nouveau vol.");
+  } else {
+    afficherBandeau("erreur", "Verification " + heure + " : A CORRIGER AVANT LE VOL",
+      ok.length + "/" + configures.length + " esclaves joignables. " + problemes.join(" ; "));
+  }
+}
+
+// Avant toute operation : s'assure que Chrome autorise l'acces au reseau
+// local. "adresseAmorce" : adresse a utiliser pour declencher la demande
+// d'autorisation (sinon, la premiere fiche qui a une adresse).
+async function verifierPermission(adresseAmorce) {
+  const amorce = adresseAmorce || (appareils.find((a) => a.adresse) || {}).adresse;
+  const etat = await etatPermissionReseauLocal();
+  if (etat === "denied") {
+    // Double controle : si un esclave repond malgre tout, l'etat annonce
+    // etait trompeur (nom de permission modifie par une future version de
+    // Chrome...) et on continue normalement.
+    if (amorce) {
+      try { await lireStatut(amorce, DELAI_REQUETE_MS); return true; } catch (e) {}
+    }
+    afficherBandeau("erreur", "Chrome bloque l'acces au reseau local pour cette page.",
+      "Dans Chrome : icone a gauche de l'adresse (ou menu 3 points > Parametres > Parametres des sites) > Acces au reseau local / Appareils du reseau local > Autoriser pour mbotte73.github.io. Decochez la verification directe (Reglages avances) pour revenir a la methode par onglets.");
+    appareils.forEach((a) => { if (a.adresse) definirEtat(a, "bloque"); });
+    return false;
+  }
+  if (etat === "prompt" && amorce) {
+    // Premiere utilisation : Chrome affiche une demande d'autorisation au
+    // premier acces. On la declenche avec UNE requete et on attend la
+    // reponse de l'operateur (delai long) avant de lancer le reste.
+    afficherBandeau("alerte", "Chrome va demander l'autorisation d'acceder aux appareils du reseau local : repondez AUTORISER.");
+    try { await requete(amorce, "/get", null, { delaiMs: 60000 }); } catch (e) {}
+    if (await etatPermissionReseauLocal() === "denied") return verifierPermission(adresseAmorce);
+  }
+  return true;
+}
+
+async function verifierTout() {
+  if (operationEnCours) return;
+  if (reglages.modeSecours) {
+    afficherBandeau("alerte", "Methode par onglets active : aucune verification possible.", "Cochez la verification directe (Reglages avances) pour l'essayer.");
+    return;
+  }
+  verrouiller(true, "Verification des esclaves...");
+  let permis = false;
+  try {
+    journaliser("=== VERIFICATION ===");
+    permis = await verifierPermission();
+    if (!permis) return;
+    document.getElementById("panneau-graine").style.display = "none";
+    nonAttribues = [];
+    dessinerAttribution();
+    await Promise.all(appareils.map(verifierUn));
+    await chercherManquants(sousReseauxConnus());
+  } finally {
+    verrouiller(false);
+    if (permis) resumerVerification();
+  }
+}
+
+async function chercherManquants(prefixes) {
+  if (appareilsManquants().length === 0) return;
+  journaliser("Esclave(s) manquant(s) ou a identifier : recherche sur " + prefixes.map((p) => p + ".x").join(", "));
+  const connues = new Set(appareils.filter(estOk).map((a) => a.adresse));
+  const trouves = prefixes.length ? await rechercher(prefixes, connues) : [];
+  journaliser("Recherche terminee : " + trouves.length + " telephone(s) phyphox trouve(s) en plus.");
+  attribuerAutomatiquement(trouves, true);
+  dessiner();
+  const manquants = appareilsManquants();
+  if (manquants.length > 0 && nonAttribues.length === 0) {
+    const panneau = document.getElementById("panneau-graine");
+    document.getElementById("texte-graine").textContent =
+      manquants.map(nomAffiche).join(", ") + " : introuvable(s) sur le reseau connu. Le reseau du maitre a probablement change (cela arrive a chaque activation du partage de connexion sur certains telephones). "
+      + "Regardez en bas de l'ecran phyphox de N'IMPORTE QUEL esclave et recopiez l'adresse affichee : la telecommande retrouvera tous les autres a partir d'elle.";
+    panneau.style.display = "block";
+  }
+}
+
+async function rechercherDepuisGraine() {
+  if (operationEnCours) return;
+  const champ = document.getElementById("saisie-graine");
+  const n = normaliserAdresse(champ.value);
+  if (!n) {
+    champ.classList.add("invalide");
+    afficherBandeau("erreur", "Adresse invalide.", "Recopiez exactement l'adresse affichee par phyphox, par exemple 192.168.57.183:8080.");
+    return;
+  }
+  champ.classList.remove("invalide");
+  champ.value = n;
+  verrouiller(true, "Recherche a partir de " + n + "...");
+  let permis = false;
+  try {
+    permis = await verifierPermission(n);
+    if (!permis) return;
+    memoriserSousReseau(sousReseau(n));
+    document.getElementById("panneau-graine").style.display = "none";
+    await chercherManquants([sousReseau(n)]);
+  } finally {
+    verrouiller(false);
+    if (permis) resumerVerification();
+  }
+}
+
+// --------------------------------------------------------------- commandes
+// Envoie une commande apres controle d'identite et CONFIRME son effet en
+// relisant l'etat de l'esclave. Les commandes sont sans danger a repeter
+// (demarrer une mesure deja en cours ne change rien), d'ou les nouvelles
+// tentatives en cas de coupure.
+// Identite : pour start/stop, un telephone d'un AUTRE modele a l'adresse
+// bloque la commande ; un homonyme non confirme la laisse passer avec un
+// avertissement (les deux telephones identiques sont de toute facon des
+// esclaves a demarrer/arreter). Pour clear, toute incertitude bloque.
+async function commander(a, cmd) {
+  const attendu = cmd === "start" ? true : cmd === "stop" ? false : null;
+  let derniereErreur = "", dernierType = "", avertissement = "", identiteControlee = false;
+  for (let tentative = 1; tentative <= 3; tentative++) {
+    try {
+      if (!identiteControlee) {
+        const id = await controlerIdentite(a);
+        identiteControlee = true;
+        if (!id.ok) {
+          if (!id.homonyme || cmd === "clear") return { ok: false, message: id.message, identite: true };
+          avertissement = " (attention : " + id.message + ")";
+        }
+      }
+      if (attendu !== null && tentative > 1) {
+        // Deja dans l'etat voulu (reponse precedente perdue) : rien a renvoyer.
+        const s = await lireStatut(a.adresse, DELAI_REQUETE_MS);
+        if (s.measuring === attendu) return { ok: true, avertissement, session: String(s.session || "") };
+      }
+      const r = await lireJson(a.adresse, "/control?cmd=" + cmd, cmd === "start" ? DELAI_DEMARRAGE_MS : DELAI_REQUETE_MS);
+      if (attendu === null) {
+        if (r && r.result === true) return { ok: true, avertissement };
+        return { ok: false, message: "phyphox a refuse la commande" };
+      }
+      const fin = Date.now() + 4000;
+      while (Date.now() < fin) {
+        const s = await lireStatut(a.adresse, DELAI_REQUETE_MS);
+        if (s.measuring === attendu) return { ok: true, avertissement, session: String(s.session || "") };
+        // Experience reglee en "mesure minutee" : compte a rebours en cours.
+        if (attendu === true && s.timedRun === true && s.countDown > 0) return { ok: true, avertissement: " (compte a rebours phyphox en cours)" + avertissement, session: String(s.session || "") };
+        await pause(400);
+      }
+      return { ok: false, message: attendu ? "phyphox n'a pas demarre (capteur indisponible ? message a l'ecran de l'esclave ?)" : "phyphox ne s'est pas arrete" };
+    } catch (e) {
+      derniereErreur = e.message;
+      dernierType = e.type;
+      if (e.type === "contenu") break;
+      if (tentative < 3) await pause(1500);
+    }
+  }
+  if (dernierType === "reseau" && await repondSansCors(a.adresse)) {
+    return { ok: false, message: "phyphox trop ancien sur cet esclave (mettre a jour en 1.2.1 ou plus), ou decocher la verification directe (methode par onglets)" };
+  }
+  return { ok: false, message: derniereErreur || "echec" };
+}
+
+// Recupere l'export en memoire, apres controle d'identite strict. "complet"
+// = mesure arretee et enregistrement inchange pendant la recuperation.
+async function exporter(a) {
+  try {
+    const id = await controlerIdentite(a);
+    if (!id.ok) return { ok: false, message: id.message };
+    const avant = await lireEvenements(a.adresse, DELAI_REQUETE_MS);
+    if (avant.length === 0) return { ok: false, vide: true, message: "memoire vide sur cet esclave (rien a exporter : jamais demarre ou deja efface)" };
+    const blob = await requete(a.adresse, "/export?format=" + FORMAT_EXPORT, (r) => r.blob(), { delaiMs: DELAI_EXPORT_MS });
+    const debut = new Uint8Array(await blob.slice(0, 4).arrayBuffer());
+    const estZip = blob.size >= 22 && debut[0] === 0x50 && debut[1] === 0x4b && debut[2] === 0x03 && debut[3] === 0x04;
+    if (!estZip) {
+      let texte = "";
+      try { texte = (await blob.slice(0, 200).text()).trim(); } catch (e) {}
+      return { ok: false, message: "fichier invalide recu" + (texte ? " (" + texte + ")" : "") };
+    }
+    const apres = await lireEvenements(a.adresse, DELAI_REQUETE_MS);
+    const statut = await lireStatut(a.adresse, DELAI_REQUETE_MS);
+    const complet = !id.statut.measuring && !statut.measuring && empreinte(avant) === empreinte(apres);
+    return { ok: true, blob, empreinte: empreinte(apres), complet };
+  } catch (e) {
+    return { ok: false, message: e.message };
+  }
+}
+
+function horodatageFichier() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, "0");
+  return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + "_" + p(d.getHours()) + "h" + p(d.getMinutes()) + "m" + p(d.getSeconds());
+}
+
+function nomFichierSur(texte) {
+  return texte.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^A-Za-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "") || "appareil";
+}
+
+function ajouterFichier(a, r) {
+  let base = horodatageFichier() + "_" + nomFichierSur(nomAffiche(a)) + (r.complet ? "" : "_PARTIEL");
+  let nomFichier = base + ".zip", n = 2;
+  while (fichiers.some((f) => f.nomFichier === nomFichier)) nomFichier = base + "_" + (n++) + ".zip";
+  fichiers.push({ ficheId: a.id, nomAppareil: nomAffiche(a), nomFichier, blob: r.blob, url: null, empreinte: r.empreinte, complet: r.complet, enregistre: false });
+  dessinerFichiers();
+}
+
+function dessinerFichiers() {
+  const panneau = document.getElementById("panneau-fichiers");
+  const liste = document.getElementById("liste-fichiers");
+  liste.textContent = "";
+  if (fichiers.length === 0) { panneau.style.display = "none"; return; }
+  const restants = fichiers.filter((f) => !f.enregistre).length;
+  document.getElementById("titre-fichiers").textContent = restants
+    ? "Fichiers recuperes : " + restants + " a enregistrer"
+    : "Tous les fichiers sont enregistres";
+  fichiers.forEach((f) => {
+    const ligne = document.createElement("div");
+    ligne.className = "fichier";
+    const nom = document.createElement("div");
+    nom.className = "nom";
+    nom.textContent = f.nomAppareil + " (" + tailleLisible(f.blob.size) + ")" + (f.complet ? "" : " PARTIEL : exporte pendant la mesure");
+    const bouton = creerBouton(f.enregistre ? "Enregistre (refaire)" : "Enregistrer", f.enregistre ? "fait" : "", () => enregistrerFichier(f), true);
+    ligne.append(nom, bouton);
+    liste.appendChild(ligne);
+  });
+  panneau.style.display = "block";
+}
+
+// Appele directement par l'appui sur le bouton : le telechargement est donc
+// toujours declenche par un geste de l'utilisateur (aucun blocage Chrome).
+function enregistrerFichier(f) {
+  if (!f.url) f.url = URL.createObjectURL(f.blob);
+  const lien = document.createElement("a");
+  lien.href = f.url;
+  lien.download = f.nomFichier;
+  document.body.appendChild(lien);
+  lien.click();
+  lien.remove();
+  f.enregistre = true;
+  const a = appareils.find((x) => x.id === f.ficheId);
+  if (a && f.complet && f.empreinte) {
+    a.empreinteSauvegardee = f.empreinte;
+    sauverAppareils();
+  }
+  journaliser("Enregistrement demande : " + f.nomFichier + " (" + tailleLisible(f.blob.size) + ") -> Telechargements.");
+  dessinerFichiers();
+}
+
+// Ne retire que les fichiers deja enregistres : un fichier non enregistre
+// n'est jamais jete (il peut etre la seule copie).
+function retirerFichiersEnregistres() {
+  fichiers = fichiers.filter((f) => {
+    if (f.enregistre && f.url) URL.revokeObjectURL(f.url);
+    return !f.enregistre;
+  });
+  dessinerFichiers();
+}
+
+const LIBELLES_COMMANDE = { start: "demarrage", stop: "arret", clear: "effacement" };
+
+// Une mesure demandee est "attendue" que le demarrage ait reussi ou non :
+// un esclave qui n'a pas demarre reste ainsi signale par la surveillance
+// en vol, au lieu de disparaitre d'un bandeau vert.
+function appliquerResultat(a, cmd, r) {
+  if (cmd === "start") { a.mesureAttendue = true; a.sessionMesure = r.ok ? (r.session || "") : ""; }
+  if (r.ok) {
+    if (cmd === "stop" || cmd === "clear") { a.mesureAttendue = false; a.sessionMesure = ""; }
+    sauverAppareils();
+    journaliser(nomAffiche(a) + " : " + LIBELLES_COMMANDE[cmd] + " confirme" + (r.avertissement || "") + ".");
+    definirEtat(a, cmd === "start" ? "mesure" : "pret", cmd === "clear" ? "Memoire videe" : (r.avertissement || "").trim());
+  } else {
+    sauverAppareils();
+    journaliser(nomAffiche(a) + " : ECHEC du " + LIBELLES_COMMANDE[cmd] + " : " + r.message);
+    definirEtat(a, r.identite ? "autre" : "injoignable", "Echec du " + LIBELLES_COMMANDE[cmd] + " : " + r.message);
+  }
+}
+
+async function actionGroupee(cmd, cibles) {
+  journaliser("=== " + LIBELLES_COMMANDE[cmd].toUpperCase() + " (" + cibles.length + " esclaves) ===");
+  cibles.forEach((a) => definirEtat(a, "travail"));
+  return Promise.all(cibles.map(async (a) => {
+    const r = await commander(a, cmd);
+    appliquerResultat(a, cmd, r);
+    return { a, ...r };
+  }));
+}
+
+// Lit sur chaque telephone l'enregistrement en memoire, et dit s'il a ete
+// enregistre ici. Renvoie { nonVides: [...], nonSauves: [...], illisibles: [...] }.
+async function inventaireDonnees(cibles) {
+  const res = { nonVides: [], nonSauves: [], illisibles: [] };
+  await Promise.all(cibles.map(async (a) => {
+    try {
+      const ev = await lireEvenements(a.adresse, DELAI_REQUETE_MS);
+      if (ev.length === 0) return;
+      res.nonVides.push(a);
+      if (empreinte(ev) !== a.empreinteSauvegardee) res.nonSauves.push(a);
+    } catch (e) {
+      res.illisibles.push(a);
+    }
+  }));
+  return res;
+}
+
+function noms(liste) { return liste.map(nomAffiche).join(", "); }
+
+async function demarrerTout() {
+  if (operationEnCours) return;
+  preparerAlarme();
+  if (reglages.modeSecours) return secoursToutFaire("start");
+  const cibles = appareils.filter((a) => a.adresse);
+  if (cibles.length === 0) { afficherBandeau("alerte", "Aucune adresse configuree."); return; }
+  verrouiller(true, "Controle avant demarrage...");
+  let resultats = [];
+  try {
+    if (!await verifierPermission()) return;
+    const inv = await inventaireDonnees(cibles);
+    if (inv.nonVides.length) {
+      const msg = "ATTENTION : " + noms(inv.nonVides) + " contient deja un enregistrement"
+        + (inv.nonSauves.length ? " (dont " + noms(inv.nonSauves) + " PAS ENCORE ENREGISTRE ici)" : "")
+        + ".\n\nDemarrer maintenant ajoutera le nouveau vol A LA SUITE dans le meme fichier.\n\n"
+        + "OK = demarrer quand meme\nAnnuler = ne rien faire (ARRETER TOUT / enregistrer / Effacer tout d'abord)";
+      if (!window.confirm(msg)) {
+        journaliser("Demarrage annule par l'operateur (enregistrement precedent present).");
+        afficherBandeau("alerte", "Demarrage annule.", "Exportez et effacez d'abord les esclaves concernes.");
+        return;
+      }
+    }
+    afficherBandeau("neutre", "Demarrage en cours...");
+    resultats = await actionGroupee("start", cibles);
+  } finally {
+    verrouiller(false);
+    bilan(resultats, "en mesure", "DEMARRAGE");
+    if (resultats.length) demarrerSurveillance();
+  }
+}
+
+async function arreterTout() {
+  if (operationEnCours) return;
+  if (reglages.modeSecours) return secoursToutFaire("stop");
+  const cibles = appareils.filter((a) => a.adresse);
+  if (cibles.length === 0) { afficherBandeau("alerte", "Aucune adresse configuree."); return; }
+  verrouiller(true, "Arret en cours...");
+  let resultats = [];
+  try {
+    if (!await verifierPermission()) return;
+    resultats = await actionGroupee("stop", cibles);
+    // Recuperation sur TOUS les esclaves, meme si l'arret a echoue sur l'un
+    // d'eux : mieux vaut un fichier de trop qu'un fichier perdu.
+    retirerFichiersEnregistres();
+    let i = 0;
+    for (const a of cibles) {
+      i++;
+      afficherBandeau("neutre", "Recuperation des fichiers : " + i + "/" + cibles.length + " (" + nomAffiche(a) + ")...");
+      const r = await exporter(a);
+      if (r.ok) {
+        ajouterFichier(a, r);
+        journaliser(nomAffiche(a) + " : fichier recupere et controle (" + tailleLisible(r.blob.size) + (r.complet ? "" : ", PARTIEL") + ").");
+        if (!r.complet) resultats.push({ a, ok: false, message: "fichier PARTIEL (la mesure tournait encore pendant l'export)" });
+      } else if (r.vide && !resultats.some((x) => x.a === a && !x.ok)) {
+        // Rien a recuperer (fiche de reserve jamais demarree...) : information,
+        // pas un echec, pour que le rouge reste reserve aux vrais problemes.
+        journaliser(nomAffiche(a) + " : " + r.message + ".");
+      } else {
+        journaliser(nomAffiche(a) + " : ECHEC de la recuperation du fichier : " + r.message);
+        resultats.push({ a, ok: false, message: "fichier non recupere : " + r.message });
+      }
+    }
+  } finally {
+    verrouiller(false);
+    // Fin de vol voulue par l'operateur : plus de surveillance, meme si un
+    // arret a echoue (l'echec est affiche par le bilan, qui ne doit pas etre
+    // remplace ensuite par un bandeau de surveillance).
+    cibles.forEach((a) => { a.mesureAttendue = false; });
+    sauverAppareils();
+    arreterSurveillance();
+    bilan(resultats, "arretes et recuperes", "ARRET + RECUPERATION");
+  }
+}
+
+async function effacerTout() {
+  if (operationEnCours) return;
+  if (reglages.modeSecours) return secoursEffacerTout();
+  const cibles = appareils.filter((a) => a.adresse);
+  if (cibles.length === 0) { afficherBandeau("alerte", "Aucune adresse configuree."); return; }
+  verrouiller(true, "Controle avant effacement...");
+  let resultats = [];
+  try {
+    if (!await verifierPermission()) return;
+    if (!await confirmerEffacement(cibles)) return;
+    afficherBandeau("neutre", "Effacement en cours...");
+    resultats = await actionGroupee("clear", cibles);
+  } finally {
+    verrouiller(false);
+    bilan(resultats, "effaces", "EFFACEMENT");
+  }
+}
+
+// Effacement : alerte forte si un enregistrement n'a pas ete enregistre
+// ici, d'apres l'etat LU SUR LE TELEPHONE (pas d'apres un souvenir local).
+async function confirmerEffacement(cibles) {
+  const inv = await inventaireDonnees(cibles);
+  const enAttente = fichiers.filter((f) => !f.enregistre);
+  let msg = "Effacer les donnees de : " + noms(cibles) + " ?";
+  const risques = inv.nonSauves.concat(inv.illisibles);
+  if (risques.length) {
+    msg = "ATTENTION, PERTE DE DONNEES :\n"
+      + (inv.nonSauves.length ? noms(inv.nonSauves) + " : enregistrement PAS ENREGISTRE dans Telechargements depuis ce telephone.\n" : "")
+      + (inv.illisibles.length ? noms(inv.illisibles) + " : etat des donnees illisible (injoignable ?).\n" : "")
+      + "\n" + msg + "\n\nOK = effacer DEFINITIVEMENT\nAnnuler = ne rien effacer";
+  }
+  if (enAttente.length) msg = "Rappel : " + enAttente.length + " fichier(s) recupere(s) pas encore enregistre(s) (boutons orange).\n\n" + msg;
+  const ok = window.confirm(msg);
+  if (!ok) {
+    journaliser("Effacement annule par l'operateur.");
+    afficherBandeau("alerte", "Effacement annule.");
+  } else if (risques.length) {
+    journaliser("Effacement CONFIRME malgre l'alerte pour : " + noms(risques));
+  }
+  return ok;
+}
+
+function bilan(resultats, participe, libelle) {
+  // Liste vide : l'operation n'a pas eu lieu (permission refusee,
+  // annulation...) ; le bandeau affiche deja la raison, on n'y touche pas.
+  if (!resultats.length) return;
+  const echecs = resultats.filter((r) => !r.ok);
+  const total = new Set(resultats.map((r) => r.a.id)).size;
+  const reussis = total - new Set(echecs.map((r) => r.a.id)).size;
+  const avertissements = resultats.filter((r) => r.ok && r.avertissement).map((r) => nomAffiche(r.a) + r.avertissement);
+  journaliser("=== " + libelle + " : " + reussis + "/" + total + " ===");
+  if (echecs.length === 0) {
+    const details = [];
+    if (avertissements.length) details.push(avertissements.join(" ; "));
+    if (fichiers.some((f) => !f.enregistre)) details.push("Enregistrez maintenant chaque fichier (boutons orange en haut).");
+    afficherBandeau(avertissements.length ? "alerte" : "ok", libelle + " : " + total + "/" + total + " " + participe + ", confirme par chaque esclave.", details.join(" "));
+  } else {
+    afficherBandeau("erreur", libelle + " : " + reussis + "/" + total + " confirme(s).",
+      echecs.map((r) => nomAffiche(r.a) + " : " + r.message).join(" ; ") + ". Verifiez que phyphox est a l'ecran sur cet esclave, puis reessayez avec le bouton de sa fiche.");
+  }
+}
+
+async function actionIndividuelle(a, action) {
+  if (operationEnCours) return;
+  if (!a.adresse) { journaliser("Adresse vide : action ignoree."); return; }
+  preparerAlarme();
+  if (reglages.modeSecours) return secoursUn(a, action);
+  verrouiller(true, nomAffiche(a) + " : en cours...");
+  try {
+    if (!await verifierPermission()) return;
+    if (action === "clear" && !await confirmerEffacement([a])) return;
+    if (action === "start") {
+      const inv = await inventaireDonnees([a]);
+      if (inv.nonVides.length && !window.confirm(nomAffiche(a) + " contient deja un enregistrement"
+          + (inv.nonSauves.length ? " PAS ENCORE ENREGISTRE ici" : "") + " : le nouveau sera ajoute a la suite. Demarrer quand meme ?")) {
+        afficherBandeau("alerte", "Demarrage annule.");
+        return;
+      }
+    }
+    definirEtat(a, "travail");
+    if (action === "export") {
+      const r = await exporter(a);
+      if (r.ok) {
+        ajouterFichier(a, r);
+        journaliser(nomAffiche(a) + " : fichier recupere et controle (" + tailleLisible(r.blob.size) + (r.complet ? "" : ", PARTIEL") + ").");
+        afficherBandeau(r.complet ? "ok" : "alerte", nomAffiche(a) + " : fichier recupere" + (r.complet ? "." : " PARTIEL (mesure en cours)."), "Enregistrez-le avec le bouton orange en haut.");
+      } else {
+        journaliser(nomAffiche(a) + " : ECHEC de la recuperation : " + r.message);
+        afficherBandeau("erreur", nomAffiche(a) + " : fichier NON recupere.", r.message);
+      }
+      await verifierUn(a);
+    } else {
+      const r = await commander(a, action);
+      appliquerResultat(a, action, r);
+      bilan([{ a, ...r }], { start: "en mesure", stop: "arrete", clear: "efface" }[action], nomAffiche(a));
+      if (action === "start") demarrerSurveillance();
+      if (action === "stop" && !appareils.some((x) => x.mesureAttendue)) arreterSurveillance();
+    }
+  } finally {
+    verrouiller(false);
+  }
+}
+
+// ======================================================= SURVEILLANCE EN VOL
+// Toutes les 15 s, relit l'etat des esclaves qui doivent mesurer. Alarme
+// (bandeau rouge, vibration, son) si l'un s'est arrete, a ete relance, ou
+// ne repond plus deux fois de suite. Fonctionne tant que la page est a
+// l'ecran : l'ecran du maitre est maintenu allume (Screen Wake Lock).
+let minuteurSurveillance = null;
+let verrouEcran = null;
+let contexteAudio = null;
+const echecsSurveillance = new Map();
+const alarmesCoupees = new Set();
+
+// A appeler pendant un appui : le son ne peut etre active qu'apres un geste.
+function preparerAlarme() {
+  try {
+    if (!contexteAudio) contexteAudio = new (window.AudioContext || window.webkitAudioContext)();
+    if (contexteAudio.state === "suspended") contexteAudio.resume();
+  } catch (e) {}
+}
+
+function sonnerAlarme() {
+  try { if (navigator.vibrate) navigator.vibrate([500, 200, 500, 200, 500]); } catch (e) {}
+  try {
+    if (!contexteAudio) return;
+    const t0 = contexteAudio.currentTime;
+    for (let i = 0; i < 3; i++) {
+      const osc = contexteAudio.createOscillator();
+      const gain = contexteAudio.createGain();
+      osc.frequency.value = 880;
+      gain.gain.value = 0.4;
+      osc.connect(gain); gain.connect(contexteAudio.destination);
+      osc.start(t0 + i * 0.5); osc.stop(t0 + i * 0.5 + 0.3);
+    }
+  } catch (e) {}
+}
+
+async function demanderVerrouEcran() {
+  try {
+    if ("wakeLock" in navigator && !verrouEcran && document.visibilityState === "visible") {
+      verrouEcran = await navigator.wakeLock.request("screen");
+      verrouEcran.addEventListener("release", () => { verrouEcran = null; });
+    }
+  } catch (e) {}
+}
+
+function demarrerSurveillance() {
+  if (reglages.modeSecours) return;
+  demanderVerrouEcran();
+  if (minuteurSurveillance) return;
+  journaliser("Surveillance en vol active (controle toutes les " + (PERIODE_SURVEILLANCE_MS / 1000) + " s).");
+  minuteurSurveillance = setInterval(tourSurveillance, PERIODE_SURVEILLANCE_MS);
+}
+
+function arreterSurveillance() {
+  if (minuteurSurveillance) {
+    clearInterval(minuteurSurveillance);
+    minuteurSurveillance = null;
+    journaliser("Surveillance en vol arretee.");
+  }
+  echecsSurveillance.clear();
+  alarmesCoupees.clear();
+  if (verrouEcran) { try { verrouEcran.release(); } catch (e) {} verrouEcran = null; }
+}
+
+let tourEnCours = false;
+
+async function tourSurveillance() {
+  if (operationEnCours || tourEnCours) return;
+  const cibles = appareils.filter((a) => a.mesureAttendue && a.adresse);
+  if (cibles.length === 0) { arreterSurveillance(); return; }
+  tourEnCours = true;
+  const operationAuDebut = compteurOperations;
+  const problemes = [], sains = [];
+  try {
+    await Promise.all(cibles.map(async (a) => {
+      try {
+        const s = await lireStatut(a.adresse, 5000);
+        echecsSurveillance.set(a.id, 0);
+        const minute = s.timedRun === true && s.countDown > 0;
+        if (a.sessionMesure && String(s.session) !== a.sessionMesure) {
+          problemes.push({ a, texte: "phyphox a ete RELANCE (mesure interrompue)" });
+        } else if (!s.measuring && !minute) {
+          problemes.push({ a, texte: "NE MESURE PAS" });
+        } else {
+          sains.push(a);
+        }
+      } catch (e) {
+        const n = (echecsSurveillance.get(a.id) || 0) + 1;
+        echecsSurveillance.set(a.id, n);
+        if (n >= 2) problemes.push({ a, texte: "NE REPOND PLUS (" + e.message + ")" });
+      }
+    }));
+  } finally {
+    tourEnCours = false;
+  }
+  // Une operation a commence (voire s'est terminee) pendant le tour : ses
+  // resultats sont plus recents, ceux du tour sont jetes.
+  if (operationEnCours || compteurOperations !== operationAuDebut) return;
+  const heure = new Date().toLocaleTimeString("fr-FR");
+  sains.forEach((a) => {
+    alarmesCoupees.delete(a.id); // retabli : une nouvelle panne sonnera a nouveau
+    definirEtat(a, "mesure", "Surveille : OK a " + heure);
+  });
+  problemes.forEach((p) => definirEtat(p.a, "alerte", p.texte));
+  const actifs = problemes.filter((p) => !alarmesCoupees.has(p.a.id));
+  if (actifs.length) {
+    journaliser("ALERTE : " + actifs.map((p) => nomAffiche(p.a) + " " + p.texte).join(" ; "));
+    const b = afficherBandeau("erreur", "ALERTE EN VOL : " + actifs.map((p) => nomAffiche(p.a) + " " + p.texte).join(" ; "),
+      "Verifiez cet esclave (phyphox a l'ecran ?). Si sa mesure est arretee, le bouton Demarrer de sa fiche la relance (les donnees s'ajoutent a la suite).");
+    b.appendChild(creerBouton("Couper l'alarme pour " + noms(actifs.map((p) => p.a)), "bouton-couper", () => {
+      actifs.forEach((p) => alarmesCoupees.add(p.a.id));
+      journaliser("Alarme coupee par l'operateur pour : " + noms(actifs.map((p) => p.a)));
+      afficherBandeau("alerte", "Alarme coupee pour " + noms(actifs.map((p) => p.a)) + " (elle sonnera a nouveau si l'esclave se retablit puis retombe).", "Les autres esclaves restent surveilles.");
+    }, true));
+    sonnerAlarme();
+  } else if (problemes.length) {
+    afficherBandeau("alerte", "Surveillance en vol : " + sains.length + "/" + cibles.length + " esclaves mesurent (controle " + heure + ").",
+      "Alarme coupee pour : " + problemes.map((p) => nomAffiche(p.a) + " " + p.texte).join(" ; "));
+  } else {
+    afficherBandeau("ok", "Surveillance en vol : " + cibles.length + "/" + cibles.length + " esclaves mesurent (controle " + heure + ").",
+      "Gardez cette page ouverte, ecran allume.");
+  }
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && minuteurSurveillance) {
+    demanderVerrouEcran();
+    tourSurveillance();
+  }
+});
+
+// ======================================================= METHODE PAR ONGLETS
+// Methode de la v1.2 (onglets ouverts sur l'adresse de commande), conservee
+// sauf le format d'export. Methode par defaut depuis la v2.1. Aucune
+// confirmation ni controle d'identite.
+function urlCommande(adresse, cmd) { return "http://" + adresse + "/control?cmd=" + cmd; }
+function urlExport(adresse) { return "http://" + adresse + "/export?format=" + FORMAT_EXPORT; }
+
+function secoursOuvrirUnOnglet(url, dureeAvantFermeture) {
+  const fenetre = window.open(url, "_blank");
+  journaliser("[onglets] " + url + " -> onglet ouvert");
+  if (!fenetre) {
+    journaliser("[onglets] Pop-up bloque : autorisez les pop-up pour cette page.");
+    return;
+  }
+  setTimeout(() => { try { fenetre.close(); } catch (e) {} }, dureeAvantFermeture);
+}
+
+function secoursSequence(urls, libelle, onTermine) {
+  if (urls.length === 0) { journaliser("[onglets] Aucune adresse configuree."); return; }
+  const fenetre = window.open(urls[0], "_blank");
+  if (!fenetre) { journaliser("[onglets] Pop-up bloque : autorisez les pop-up pour cette page."); return; }
+  journaliser("[onglets] " + urls[0] + " (1/" + urls.length + ")");
+  let i = 1;
+  const DELAI = 2000;
+  function suivante() {
+    setTimeout(() => {
+      if (i >= urls.length) {
+        try { fenetre.close(); } catch (e) {}
+        journaliser("[onglets] === " + libelle + " envoye (sans confirmation) ===");
+        if (onTermine) onTermine();
+        return;
+      }
+      try { fenetre.location.href = urls[i]; journaliser("[onglets] " + urls[i] + " (" + (i + 1) + "/" + urls.length + ")"); }
+      catch (e) { journaliser("[onglets] Erreur : " + e.message); }
+      i++;
+      suivante();
+    }, DELAI);
+  }
+  suivante();
+}
+
+function secoursProposerExports() {
+  const actifs = appareils.filter((a) => a.adresse);
+  afficherBandeau("alerte", "Exports : un appui par fichier (panneau orange), en attendant a chaque fois son arrivee dans Telechargements.");
+  const liste = document.getElementById("liste-secours");
+  liste.textContent = "";
+  actifs.forEach((a) => {
+    const ligne = document.createElement("div");
+    ligne.className = "fichier";
+    const nom = document.createElement("div");
+    nom.className = "nom";
+    nom.textContent = nomAffiche(a) + " (" + a.adresse + ")";
+    const bouton = creerBouton("Exporter", "", () => { secoursOuvrirUnOnglet(urlExport(a.adresse), 8000); bouton.className = "fait"; bouton.textContent = "Declenche (refaire)"; }, true);
+    ligne.append(nom, bouton);
+    liste.appendChild(ligne);
+  });
+  document.getElementById("panneau-secours").style.display = "block";
+}
+
+function secoursToutFaire(cmd) {
+  const urls = appareils.filter((a) => a.adresse).map((a) => urlCommande(a.adresse, cmd));
+  if (cmd === "stop") secoursSequence(urls, "Arret", secoursProposerExports);
+  else secoursSequence(urls, "Demarrage");
+}
+
+function secoursEffacerTout() {
+  if (!window.confirm("Effacer les donnees de tous les esclaves ?\n\nAucune verification possible avec la methode par onglets : assurez-vous que TOUS les fichiers sont dans Telechargements.")) return;
+  secoursSequence(appareils.filter((a) => a.adresse).map((a) => urlCommande(a.adresse, "clear")), "Effacement");
+}
+
+function secoursUn(a, action) {
+  if (action === "clear" && !window.confirm("Effacer " + nomAffiche(a) + " ? Aucune verification possible.")) return;
+  if (action === "export") secoursOuvrirUnOnglet(urlExport(a.adresse), 8000);
+  else secoursOuvrirUnOnglet(urlCommande(a.adresse, action), 2000);
+}
+
+// ================================================================= demarrage
+document.getElementById("bouton-verifier").addEventListener("click", () => { preparerAlarme(); verifierTout(); });
+document.getElementById("bouton-demarrer-tout").addEventListener("click", demarrerTout);
+document.getElementById("bouton-arreter-tout").addEventListener("click", arreterTout);
+document.getElementById("bouton-effacer-tout").addEventListener("click", effacerTout);
+document.getElementById("bouton-graine").addEventListener("click", rechercherDepuisGraine);
+document.getElementById("saisie-graine").addEventListener("keydown", (e) => { if (e.key === "Enter") rechercherDepuisGraine(); });
+const caseDirecte = document.getElementById("case-directe");
+caseDirecte.checked = !reglages.modeSecours;
+
+// Elements propres a la verification directe : visibles seulement dans ce mode.
+function appliquerMode() {
+  const direct = !reglages.modeSecours;
+  document.getElementById("bouton-verifier").style.display = direct ? "" : "none";
+  if (!direct) {
+    document.getElementById("panneau-graine").style.display = "none";
+    document.getElementById("panneau-attribution").style.display = "none";
+  }
+}
+
+function afficherBandeauMode() {
+  if (reglages.modeSecours) {
+    afficherBandeau("neutre", "Methode par onglets : les commandes partent sans confirmation de reception.",
+      "Apres DEMARRER TOUT, controlez chaque esclave avec son bouton Voir (courbe en direct) ou sur son ecran.");
+  } else {
+    afficherBandeau("neutre", "Appuyez sur VERIFIER LES ESCLAVES avant chaque vol.");
+  }
+}
+
+caseDirecte.addEventListener("change", () => {
+  if (operationEnCours) { caseDirecte.checked = !reglages.modeSecours; return; }
+  reglages.modeSecours = !caseDirecte.checked;
+  sauverReglages();
+  journaliser(reglages.modeSecours ? "Methode par onglets activee (aucune confirmation)." : "Verification directe activee (experimentale).");
+  if (reglages.modeSecours) arreterSurveillance();
+  appliquerMode();
+  dessiner();
+  afficherBandeauMode();
+});
+
+appliquerMode();
 dessiner();
-journaliser("Page prete. " + appareils.length + " appareil(s) configure(s).");
+journaliser("Page prete (v" + VERSION_TELECOMMANDE.split(" ")[0] + "). " + appareils.length + " fiche(s).");
+messagesDeReprise.forEach(journaliser);
+if (reglages.modeSecours) {
+  afficherBandeauMode();
+} else if (appareils.some((a) => a.mesureAttendue)) {
+  // Page rechargee pendant un vol : la surveillance reprend.
+  afficherBandeau("alerte", "Mesure en cours d'apres le dernier demarrage : surveillance relancee.", "Touchez l'ecran une fois pour autoriser le son de l'alarme.");
+  document.addEventListener("pointerdown", preparerAlarme, { once: true });
+  demarrerSurveillance();
+  tourSurveillance();
+}
+
+window.addEventListener("beforeunload", (e) => {
+  if (fichiers.some((f) => !f.enregistre)) { e.preventDefault(); e.returnValue = ""; }
+});
 
 // ------------------------------------------------------------- hors ligne
-// Enregistre le service worker qui permet de rouvrir cette page sans
-// reseau (voir sw.js). Echoue silencieusement (avec trace dans le journal)
-// sur un navigateur qui ne le supporte pas : la page reste utilisable,
-// simplement sans le mode hors ligne.
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("sw.js")
-      .then(() => journaliser("Mode hors ligne active (page installee localement)."))
+      .then(() => journaliser("Mode hors ligne actif (page installee localement)."))
       .catch((e) => journaliser("Mode hors ligne indisponible : " + e.message));
   });
 }
