@@ -4,9 +4,11 @@
   "version": "1.0.0",
   "description": "Harnais de tests (Playwright) pour l'outil d'analyse acoustique. L'outil lui-meme (index.html) reste utilisable sans installation ; ces tests, eux, necessitent Node.js.",
   "scripts": {
-    "test": "playwright test"
+    "test": "playwright test",
+    "construire-cabine": "node outils/cabine-3d/construire.js"
   },
   "devDependencies": {
-    "@playwright/test": "^1.47.0"
+    "@playwright/test": "^1.47.0",
+    "three": "0.160.0"
   }
 }
