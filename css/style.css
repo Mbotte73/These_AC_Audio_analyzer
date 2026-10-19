@@ -220,3 +220,20 @@ footer{ text-align:center; color:var(--ink-soft); font-size:.82rem; padding:1rem
 .pat-table{ margin:.4rem 0 .6rem; }
 .pat-table td .note{ font-size:.75rem; }
 .pat-table .pastille{ width:10px; height:10px; border-radius:50%; display:inline-block; margin-right:.4rem; }
+
+/* ------------------------------------------------ vue Atténuation d'un casque */
+.tabs.modes{ margin-bottom:1.2rem; }
+.casque-zones{ display:flex; flex-wrap:wrap; gap:1rem; }
+.casque-depot .drop{ padding:1rem; background:#fff; }
+.casque-depot .note{ margin-top:.5rem; }
+.casque-liste{ margin:.5rem 0 0; padding-left:1.1rem; font-size:.85rem; color:var(--brand); }
+.casque-liste li{ margin-bottom:.2rem; }
+.casque-retirer{ margin-left:.5rem; font-size:.75rem; background:none; border:1px solid var(--line); border-radius:4px; color:var(--ink-soft); cursor:pointer; padding:.05rem .4rem; }
+.casque-retirer:hover{ border-color:var(--warn-line); color:var(--warn-ink); }
+#casqueResultats h3{ margin:1.2rem 0 .5rem; }
+.casque-table{ margin-top:1rem; }
+.casque-table td{ font-variant-numeric:tabular-nums; }
+@media print{
+  #casqueResultats h3{ break-after:avoid; }
+  .casque-table{ break-inside:auto; }
+}

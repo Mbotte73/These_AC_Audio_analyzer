@@ -11,7 +11,7 @@
 // Numero de version affiche en pied de page (pas d'etape de build dans cet
 // outil : a incrementer ICI a la main a chaque evolution notable, avec la
 // date du jour). Seule constante a modifier pour changer l'indicateur.
-const VERSION_OUTIL = "v1.9 — 8 oct. 2026";
+const VERSION_OUTIL = "v1.10 — 19 oct. 2026";
 document.getElementById("pieDeVersion").textContent = VERSION_OUTIL;
 
 function nomVoie(i) { return `Voie ${i+1}`; }
@@ -599,7 +599,8 @@ function rafraichirOngletActif() { activerOnglet(ongletActif); }
 // synchrone (aucun requestAnimationFrame), donc rien n'est visible a
 // l'ecran entre l'ajout et le retrait de la classe.
 function preparerVueImpression() {
-  if (!wavData) return;
+  // en vue "Atténuation d'un casque", seule cette vue s'imprime
+  if (!wavData || document.body.classList.contains("mode-casque")) return;
   document.body.classList.add("impression");
   for (const v of voiesAnalysees()) rendreOngletVoie(v, document.getElementById(`contenu-voie${v}`));
   rendreOngletComparaison(document.getElementById("contenu-comparaison"));

@@ -20,6 +20,13 @@
 
 <main>
 
+  <nav class="tabs no-print modes" id="modesNav">
+    <button type="button" data-mode="transport" class="actif">Mesures de transport</button>
+    <button type="button" data-mode="casque">Atténuation d'un casque</button>
+  </nav>
+
+  <div id="vueTransport">
+
   <div class="panel no-print">
     <h2>1. Fichiers de mesure (.WAV et .TXT)</h2>
     <p style="color:var(--ink-soft); font-size:.9rem; margin-top:-.4rem;">
@@ -54,11 +61,17 @@
       <li>Etalonnage par voie (fichier de metadonnees .TXT) et correction de la fonction de transfert du microphone.</li>
       <li>Onglet Vol : trajectoire GPS, accelerometres et niveau dB(A) synchronises sur une carte.</li>
       <li>Onglet Exposition patient : atténuation du bruit par la couveuse, transmission des vibrations du plancher au support de l'enfant, confort vibratoire et chocs (ISO 2631-1, indicatif).</li>
+      <li>Vue Atténuation d'un casque : spectres mesurés et atténuation par tiers d'octave d'un casque antibruit sur banc (enceinte, micro sous le casque, micro de référence), avec la dispersion entre poses.</li>
       <li>Export des graphiques en PNG, du tableau de synthese en CSV et impression PDF consolidee de tous les onglets.</li>
     </ul>
   </div>
 
   <div id="zoneResultats"></div>
+
+  </div>
+
+  <!-- Vue independante : banc d'essai de l'attenuation d'un casque antibruit (js/casque.js) -->
+  <div id="vueCasque" style="display:none;"></div>
 
 </main>
 
@@ -72,5 +85,6 @@
 <script src="js/vol.js"></script>
 <script src="js/patient.js"></script>
 <script src="js/app.js"></script>
+<script src="js/casque.js"></script>
 </body>
 </html>

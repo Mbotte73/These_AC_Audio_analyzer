@@ -151,7 +151,9 @@ function boutonExportCanvas(canvas, nomFichierFn) {
 function tracerCourbe(canvas, series, opts) {
   opts = opts || {};
   const { ctx, w, h } = preparerCanvas(canvas);
-  const legende = series.length > 1;
+  // une serie marquee sansLegende (ex. second bord d'une enveloppe) est
+  // tracee mais n'apparait pas dans la legende
+  const legende = series.filter(s => !s.sansLegende).length > 1;
   const M = { l: 52, r: 16, t: legende ? 40 : 26, b: 40 };
   ctx.clearRect(0,0,w,h);
   ctx.font = "13px sans-serif";
@@ -301,6 +303,7 @@ function tracerCourbe(canvas, series, opts) {
     let lx = M.l;
     ctx.textAlign = "left"; ctx.textBaseline = "middle"; ctx.font = "12px sans-serif";
     for (const s of series) {
+      if (s.sansLegende) continue;
       ctx.strokeStyle = s.couleur; ctx.lineWidth = 2.5;
       ctx.setLineDash(s.tirets || []);
       ctx.beginPath(); ctx.moveTo(lx, 28); ctx.lineTo(lx+18, 28); ctx.stroke();
